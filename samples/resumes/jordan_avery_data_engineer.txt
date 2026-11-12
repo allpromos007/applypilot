@@ -1,0 +1,27 @@
+Jordan Avery
+Seattle, WA | jordan.avery@example.com | (206) 555-0142 | linkedin.com/in/jordan-avery-demo
+
+SUMMARY
+Data engineer with 6 years of experience building batch and streaming data pipelines
+for e-commerce and logistics companies. Comfortable owning projects end to end and
+working closely with analysts and product managers.
+
+EXPERIENCE
+Data Engineer, Northwind Logistics (Seattle, WA)    2021 - Present
+- Built and maintained ETL pipelines in Python and SQL that load shipment data into the warehouse.
+- Migrated nightly batch jobs from cron scripts to Apache Airflow, cutting failed runs by 40%.
+- Designed dimensional data models used by the finance and operations teams.
+- Worked with analysts to define metrics for on-time delivery dashboards in Tableau.
+- Mentored two junior engineers on code review and testing practices.
+
+Data Analyst / Engineer, Contoso Retail (Portland, OR)    2018 - 2021
+- Wrote SQL reports and Python scripts for weekly sales and inventory analysis.
+- Moved reporting tables from MySQL to Amazon Redshift, reducing query time from minutes to seconds.
+- Automated data quality checks that caught pricing errors before they reached stores.
+- Supported A/B testing of promotional emails for 2 million customers.
+
+EDUCATION
+B.S. Information Systems, University of Washington, 2018
+
+SKILLS
+Python, SQL, Apache Airflow, AWS (S3, Redshift), MySQL, Tableau, Git, Linux, data modeling

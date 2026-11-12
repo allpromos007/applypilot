@@ -1,0 +1,17 @@
+# Default companies ApplyPilot searches when the candidate doesn't name any.
+# Greenhouse: the <name> in https://boards.greenhouse.io/<name>
+# Lever:      the <name> in https://jobs.lever.co/<name>
+# Verified reachable on 2026-11-12. Keep the list short: each board is one HTTP
+# call and large boards (hundreds of postings) slow searches down.
+greenhouse:
+  - airbnb
+  - cloudflare
+  - datadog
+  - dropbox
+  - figma
+  - gitlab
+  - reddit
+lever:
+  - palantir
+  - spotify
+  - zoox

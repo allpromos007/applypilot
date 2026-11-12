@@ -1,0 +1,24 @@
+Senior Data Engineer - Remote (US)
+
+About the role
+We are looking for a Senior Data Engineer to design and scale the data platform that
+powers analytics and machine learning across the company.
+
+What you'll do
+- Design, build and operate batch and streaming data pipelines on Google Cloud (GCP).
+- Own our BigQuery data warehouse, including data modeling and performance tuning.
+- Build streaming ingestion with Kafka and orchestrate workflows with Airflow.
+- Write production-quality Python and SQL, with tests and CI/CD.
+- Manage infrastructure as code with Terraform and deploy services on Kubernetes.
+- Partner with stakeholders across analytics, product and ML teams.
+
+What we're looking for
+- 5+ years of experience in data engineering.
+- Expert Python and SQL.
+- Hands-on experience with BigQuery, Airflow, Kafka and Spark.
+- Experience with Terraform, Docker and Kubernetes.
+
+Nice to have
+- dbt experience.
+- Exposure to machine learning pipelines or generative AI.
+- Experience mentoring engineers.
