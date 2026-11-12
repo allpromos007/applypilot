@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import unicodedata
 from collections import Counter
 
 # Curated skills lexicon. Multi-word phrases are matched before single words.
@@ -88,6 +89,26 @@ SKILL_ALIASES: dict[str, list[str]] = {
     "vue": ["vue", "vue.js"],
     "ios": ["ios", "swift"],
     "android": ["android"],
+    "next.js": ["next.js", "nextjs"],
+    "node.js": ["node.js", "nodejs", "nestjs", "express.js"],
+    "fastapi": ["fastapi"],
+    "websockets": ["websockets", "websocket", "webrtc"],
+    "accessibility": ["accessibility", "wcag", "a11y"],
+    "oauth": ["oauth", "oauth 2.0", "oidc", "openid connect"],
+    "automated testing": [
+        "jest",
+        "playwright",
+        "pytest",
+        "unit testing",
+        "test automation",
+    ],
+    # Healthcare
+    "fhir": ["fhir", "fhir r4", "smart on fhir"],
+    "hl7": ["hl7", "hl7 v2"],
+    "hipaa": ["hipaa", "phi"],
+    "ehr integration": ["ehr", "emr", "epic", "cerner", "oracle health"],
+    "healthcare": ["healthcare", "clinical", "telehealth", "digital health"],
+    "soc 2": ["soc 2", "soc2"],
     # Practices / business
     "agile": ["agile", "scrum", "kanban"],
     "product management": ["product management", "product roadmap", "roadmap"],
@@ -128,6 +149,19 @@ STANDARD_SECTIONS: dict[str, list[str]] = {
     "projects": ["projects", "selected projects", "key projects"],
 }
 REQUIRED_SECTIONS = ("summary", "experience", "education", "skills")
+# Keyword -> section for combined ALL-CAPS headings. Order matters: the first
+# keyword found wins (EDUCATION & CERTIFICATIONS -> education).
+HEADING_KEYWORDS: list[tuple[str, str]] = [
+    ("experience", "experience"),
+    ("employment", "experience"),
+    ("education", "education"),
+    ("skills", "skills"),
+    ("competencies", "skills"),
+    ("summary", "summary"),
+    ("profile", "summary"),
+    ("projects", "projects"),
+    ("certifications", "certifications"),
+]
 
 STOPWORDS = set(
     """a an and are as at be been but by can for from has have in into is it its of on or
@@ -145,6 +179,7 @@ PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?
 LINKEDIN_RE = re.compile(
     r"(?:https?://)?(?:www\.)?linkedin\.com/in/[A-Za-z0-9_-]+/?", re.I
 )
+GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9_-]+/?", re.I)
 QUANTIFIED_RE = re.compile(
     r"(\d+(?:\.\d+)?\s?%|\$\s?\d[\d,.]*\s?[kmb]?|\b\d[\d,.]*\s?(?:k|m|b|x|\+)?\s?"
     r"(?:users|customers|clients|requests|people|engineers|hours|days|ms|tb|gb|pb|"
@@ -195,7 +230,12 @@ def top_keywords(text: str, limit: int = 20) -> list[str]:
 
 
 def detect_sections(text: str) -> dict[str, str]:
-    """Split resume text into standard sections using heading detection."""
+    """Split resume text into standard sections using heading detection.
+
+    A line is a heading if it exactly matches a known alias ("Work Experience:"),
+    or if it is a short ALL-CAPS line containing a section keyword, which covers
+    combined headings like "EDUCATION & CERTIFICATIONS" or "KEY PROJECTS".
+    """
     alias_to_section = {
         alias: section
         for section, aliases in STANDARD_SECTIONS.items()
@@ -206,10 +246,13 @@ def detect_sections(text: str) -> dict[str, str]:
     for line in text.splitlines():
         stripped = line.strip().rstrip(":").strip()
         key = stripped.lower()
-        # A heading is a short line that exactly matches a known section name
-        # (e.g. "EXPERIENCE", "Work Experience:"), regardless of capitalisation.
-        if key in alias_to_section and len(stripped) <= 40:
-            current = alias_to_section[key]
+        section = alias_to_section.get(key) if len(stripped) <= 40 else None
+        if section is None and stripped.isupper() and 1 <= len(stripped.split()) <= 6:
+            section = next(
+                (s for kw, s in HEADING_KEYWORDS if re.search(rf"\b{kw}\b", key)), None
+            )
+        if section:
+            current = section
             sections.setdefault(current, [])
             continue
         sections.setdefault(current, []).append(line)
@@ -218,23 +261,37 @@ def detect_sections(text: str) -> dict[str, str]:
     }
 
 
+def clean_extracted_text(text: str) -> str:
+    """Normalise text extracted from PDFs/DOCX.
+
+    NFKC folds typographic ligatures ('ﬁ' -> 'fi', 'ﬂ' -> 'fl') and full-width
+    characters, so words like 'workﬂows' match the keyword 'workflows'.
+    """
+    return unicodedata.normalize("NFKC", text)
+
+
 def mask_contact_details(text: str) -> tuple[str, list[str]]:
-    """Mask email/phone/LinkedIn and report which were present.
+    """Mask email/phone/LinkedIn/GitHub and report which were present.
 
     This is a lightweight first line of defence so raw contact details never
     reach the model context; the full PII pipeline (Cloud DLP) is applied to
-    logs and memory separately.
+    logs and memory separately. Profile URLs are masked BEFORE emails because
+    PDF extraction often glues them together ('me@mail.comlinkedin.com/in/me').
     """
     detected = []
+    if LINKEDIN_RE.search(text):
+        detected.append("linkedin")
+        text = LINKEDIN_RE.sub(" [LINKEDIN] ", text)
+    if GITHUB_RE.search(text):
+        detected.append("github")
+        text = GITHUB_RE.sub(" [GITHUB] ", text)
     if EMAIL_RE.search(text):
         detected.append("email")
         text = EMAIL_RE.sub("[EMAIL]", text)
-    if LINKEDIN_RE.search(text):
-        detected.append("linkedin")
-        text = LINKEDIN_RE.sub("[LINKEDIN]", text)
     if PHONE_RE.search(text):
         detected.append("phone")
         text = PHONE_RE.sub("[PHONE]", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
     return text, detected
 
 

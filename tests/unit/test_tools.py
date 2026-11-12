@@ -28,6 +28,26 @@ def test_parse_resume_masks_pii_and_finds_sections():
     assert result["missing_standard_sections"] == []
 
 
+def test_parse_real_pdf_resume_regressions():
+    """Regressions found with the Maya Lin PDF (glued URLs, ligatures, combined headings)."""
+    result = resume_tools.parse_resume_document(
+        str(ROOT / "samples/resumes/maya_lin_healthcare_full_stack.pdf")
+    )
+    assert result["status"] == "success"
+    text = result["full_text"]
+    # Contact details glued together by PDF extraction are all masked.
+    assert {"email", "phone", "linkedin", "github"} <= set(
+        result["contact_fields_detected"]
+    )
+    for leaked in ("maya.lin.dev", "555-0184", "mayalindev"):
+        assert leaked not in text
+    # Ligatures are folded so keywords match.
+    assert "\ufb01" not in text and "\ufb02" not in text
+    assert "workflows" in text
+    # "EDUCATION & CERTIFICATIONS" is recognised as the education section.
+    assert result["missing_standard_sections"] == []
+
+
 def test_parse_resume_docx(tmp_path):
     import docx
 

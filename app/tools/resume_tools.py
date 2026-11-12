@@ -12,6 +12,7 @@ from app.tools.errors import ToolErrorCode, tool_error, validation_error
 from app.tools.schemas import ParsedResume, ParseResumeInput, ResumeSection
 from app.tools.text_analysis import (
     REQUIRED_SECTIONS,
+    clean_extracted_text,
     detect_sections,
     mask_contact_details,
 )
@@ -109,7 +110,7 @@ def parse_resume_document(file_path: str) -> dict[str, Any]:
             "read. Tell the candidate this and ask for a text-based version.",
         )
 
-    masked, contact_fields = mask_contact_details(raw)
+    masked, contact_fields = mask_contact_details(clean_extracted_text(raw))
     sections = detect_sections(masked)
     result = ParsedResume(
         file_name=path.name,
