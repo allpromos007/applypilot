@@ -288,3 +288,24 @@ def test_job_details_greenhouse(monkeypatch):
     assert result["status"] == "success"
     assert "BigQuery" in result["description_text"]
     assert "<p>" not in result["description_text"]
+
+
+def test_impact_counts_wrapped_pdf_sentences_once():
+    """Regression: un-bulleted PDF text wraps one achievement over several lines."""
+    from app.tools.text_analysis import count_quantified_bullets
+
+    wrapped = (
+        "Software Engineer, Acme  March 2024 - Present\n"
+        "Built a patient portal in React serving\n"
+        "140,000+ monthly active patients, cutting wait times by 34%.\n"
+        "Improved accessibility of the clinician dashboard for\n"
+        "nurses and providers across the network.\n"
+    )
+    bulleted = (
+        "Software Engineer, Acme  March 2024 - Present\n"
+        "- Built a patient portal in React serving\n"
+        "  140,000+ monthly active patients, cutting wait times by 34%.\n"
+        "- Improved accessibility of the clinician dashboard for nurses.\n"
+    )
+    assert count_quantified_bullets(wrapped) == (1, 2)
+    assert count_quantified_bullets(bulleted) == (1, 2)

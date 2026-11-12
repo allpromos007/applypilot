@@ -182,12 +182,17 @@ LINKEDIN_RE = re.compile(
 GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9_-]+/?", re.I)
 QUANTIFIED_RE = re.compile(
     r"(\d+(?:\.\d+)?\s?%|\$\s?\d[\d,.]*\s?[kmb]?|\b\d[\d,.]*\s?(?:k|m|b|x|\+)?\s?"
-    r"(?:users|customers|clients|requests|people|engineers|hours|days|ms|tb|gb|pb|"
+    r"(?:users|customers|clients|patients|clinics|nurses|providers|stores|requests|people|"
+    r"engineers|seconds|minutes|hours|days|weeks|ms|tb|gb|pb|"
     r"million|billion|thousand)\b)",
     re.I,
 )
 YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?years?", re.I)
 BULLET_RE = re.compile(r"^\s*(?:[-*\u2022\u25aa\u25cf]|\d+\.)\s+", re.M)
+DATE_RANGE_RE = re.compile(
+    r"(?i)\b(?:19|20)\d{2}\b\s*(?:-|\u2013|\u2014|to)\s*(?:present|current|(?:19|20)\d{2})\b"
+    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(?:19|20)\d{2}\b"
+)
 
 
 def normalise(text: str) -> str:
@@ -295,14 +300,40 @@ def mask_contact_details(text: str) -> tuple[str, list[str]]:
     return text, detected
 
 
+def split_achievements(text: str) -> list[str]:
+    """Split an experience section into individual achievement statements.
+
+    Works for both formats we see in practice:
+    - Bulleted text ("- Built ...") -> one item per bullet, with wrapped
+      continuation lines joined back onto their bullet.
+    - Un-bulleted PDF text, where one achievement wraps over several lines ->
+      lines are joined and split into sentences, so a wrapped sentence counts
+      once rather than once per line.
+    Job header lines (title/company/dates) are excluded in both cases.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if any(BULLET_RE.match(ln) for ln in lines):
+        items: list[str] = []
+        for ln in lines:
+            if BULLET_RE.match(ln):
+                items.append(BULLET_RE.sub("", ln, count=1))
+            elif (
+                items
+                and not DATE_RANGE_RE.search(ln)
+                and not items[-1].rstrip().endswith((".", "!", "?"))
+            ):
+                items[-1] += " " + ln  # wrapped continuation of the previous bullet
+        return items
+    body = " ".join(ln for ln in lines if not DATE_RANGE_RE.search(ln))
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", body)
+    return [s for s in sentences if len(s.split()) >= 6]
+
+
 def count_quantified_bullets(text: str) -> tuple[int, int]:
-    """Return (bullets_with_numbers, total_bullets_or_lines) for impact scoring."""
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    bullets = [ln for ln in lines if BULLET_RE.match(ln)] or [
-        ln for ln in lines if len(ln.split()) >= 6
-    ]
-    quantified = [ln for ln in bullets if QUANTIFIED_RE.search(ln)]
-    return len(quantified), len(bullets)
+    """Return (achievements_with_metrics, total_achievements) for impact scoring."""
+    items = split_achievements(text)
+    quantified = [it for it in items if QUANTIFIED_RE.search(it)]
+    return len(quantified), len(items)
 
 
 def estimate_min_years(text: str) -> int | None:

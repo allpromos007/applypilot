@@ -12,64 +12,160 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""ApplyPilot agent graph.
 
-import datetime
-from zoneinfo import ZoneInfo
+    applypilot (Coordinator, FAST model)
+    ├── profile_agent                (FAST)   resume + preferences
+    ├── job_matcher_agent            (FAST)   Greenhouse/Lever search, job selection
+    └── resume_tailoring_pipeline    SequentialAgent
+        ├── ats_gap_analyst          (FAST)   BEFORE score + tailoring plan
+        ├── document_writers         ParallelAgent
+        │   ├── resume_rewriter      (REASONING) tailored ATS resume
+        │   └── cover_letter_writer  (REASONING) matching cover letter
+        └── ats_rescorer             (FAST)   AFTER score + comparison
 
-from google.adk.agents import Agent
+Specialists are exposed to the coordinator as AgentTools, so the coordinator
+stays in control of the conversation and receives each specialist's result.
+Agents share large artefacts (resume, JD, drafts) through session state.
+"""
+
+from google.adk.agents import Agent, ParallelAgent, SequentialAgent
 from google.adk.apps import App
 from google.adk.models import Gemini
+from google.adk.tools import AgentTool
 from google.genai import types
 
+from app import prompts
+from app.config import get_settings
+from app.tools.session_tools import (
+    extract_requirements_for_target_job,
+    find_jobs_matching_saved_preferences,
+    get_tailored_application_documents,
+    load_candidate_resume,
+    save_candidate_preferences,
+    score_resume_for_target_job,
+    select_target_job,
+    use_pasted_job_description,
+)
 
-MODEL = "gemini-3.8-flash"
+settings = get_settings()
 
+# --------------------------------------------------------------------------- #
+# Strategic model routing (rubric 3.2)
+# FAST      -> conversation, routing, tool calling, analysis   (low latency/cost)
+# REASONING -> long-form, quality-critical writing             (best quality)
+# --------------------------------------------------------------------------- #
+_RETRY = types.HttpRetryOptions(attempts=3)
+FAST_MODEL = Gemini(model=settings.models.fast, retry_options=_RETRY)
+REASONING_MODEL = Gemini(model=settings.models.reasoning, retry_options=_RETRY)
 
-def get_weather(query: str) -> str:
-    """Simulates a web search. Use it get information on weather.
+_PRECISE = types.GenerateContentConfig(temperature=0.1)
+_CREATIVE = types.GenerateContentConfig(temperature=0.4)
 
-    Args:
-        query: A string containing the location to get weather information for.
+# --------------------------------------------------------------------------- #
+# Specialists
+# --------------------------------------------------------------------------- #
+profile_agent = Agent(
+    name="profile_agent",
+    description="Loads the candidate's resume file and saves their job-search preferences.",
+    model=FAST_MODEL,
+    instruction=prompts.PROFILE_AGENT_INSTRUCTION,
+    tools=[load_candidate_resume, save_candidate_preferences],
+    generate_content_config=_PRECISE,
+)
 
-    Returns:
-        A string with the simulated weather information for the queried location.
-    """
-    if "sf" in query.lower() or "san francisco" in query.lower():
-        return "It's 60 degrees and foggy."
-    return "It's 90 degrees and sunny."
+job_matcher_agent = Agent(
+    name="job_matcher_agent",
+    description=(
+        "Finds open jobs on Greenhouse/Lever matching the saved preferences, selects "
+        "the target job by job_id, or uses a job description pasted by the candidate."
+    ),
+    model=FAST_MODEL,
+    instruction=prompts.JOB_MATCHER_INSTRUCTION,
+    tools=[
+        find_jobs_matching_saved_preferences,
+        select_target_job,
+        use_pasted_job_description,
+    ],
+    generate_content_config=_PRECISE,
+)
 
+ats_gap_analyst = Agent(
+    name="ats_gap_analyst",
+    description="Scores the original resume and writes a truthful tailoring plan.",
+    model=FAST_MODEL,
+    instruction=prompts.GAP_ANALYST_INSTRUCTION,
+    tools=[score_resume_for_target_job, extract_requirements_for_target_job],
+    output_key="tailoring_plan",
+    generate_content_config=_PRECISE,
+)
 
-def get_current_time(query: str) -> str:
-    """Simulates getting the current time for a city.
+resume_rewriter = Agent(
+    name="resume_rewriter",
+    description="Writes the tailored, ATS-friendly resume.",
+    model=REASONING_MODEL,
+    instruction=prompts.RESUME_REWRITER_INSTRUCTION,
+    include_contents="none",  # everything it needs is injected from state
+    output_key="tailored_resume",
+    generate_content_config=_CREATIVE,
+)
 
-    Args:
-        city: The name of the city to get the current time for.
+cover_letter_writer = Agent(
+    name="cover_letter_writer",
+    description="Writes a cover letter aligned with the job and the candidate's real experience.",
+    model=REASONING_MODEL,
+    instruction=prompts.COVER_LETTER_INSTRUCTION,
+    include_contents="none",
+    output_key="cover_letter",
+    generate_content_config=_CREATIVE,
+)
 
-    Returns:
-        A string with the current time information.
-    """
-    if "sf" in query.lower() or "san francisco" in query.lower():
-        tz_identifier = "America/Los_Angeles"
-    else:
-        return f"Sorry, I don't have timezone information for query: {query}."
+# Resume and cover letter are independent given the plan, so write them in parallel.
+document_writers = ParallelAgent(
+    name="document_writers",
+    description="Writes the tailored resume and cover letter concurrently.",
+    sub_agents=[resume_rewriter, cover_letter_writer],
+)
 
-    tz = ZoneInfo(tz_identifier)
-    now = datetime.datetime.now(tz)
-    return f"The current time for query {query} is {now.strftime('%Y-%m-%d %H:%M:%S %Z%z')}"
+ats_rescorer = Agent(
+    name="ats_rescorer",
+    description="Scores the tailored resume and reports the before/after change.",
+    model=FAST_MODEL,
+    instruction=prompts.ATS_RESCORER_INSTRUCTION,
+    tools=[score_resume_for_target_job],
+    output_key="ats_comparison",
+    generate_content_config=_PRECISE,
+)
 
+resume_tailoring_pipeline = SequentialAgent(
+    name="resume_tailoring_pipeline",
+    description=(
+        "For the selected target job: scores the original resume (BEFORE), plans "
+        "truthful changes, writes the tailored resume and cover letter in parallel, "
+        "then re-scores (AFTER). Requires a loaded resume and a selected job."
+    ),
+    sub_agents=[ats_gap_analyst, document_writers, ats_rescorer],
+)
 
+# --------------------------------------------------------------------------- #
+# Coordinator
+# --------------------------------------------------------------------------- #
 root_agent = Agent(
     # Keep in sync with create_params.root_agent_name in agents-cli-manifest.yaml:
     # telemetry reports this name as gen_ai.agent.name, and agents-cli reports the
     # manifest's value. Renaming the agent only here makes the two disagree, and
     # anything selecting traces by name stops finding this agent's.
     name="applypilot",
-    model=Gemini(
-        model=MODEL,
-        retry_options=types.HttpRetryOptions(attempts=3),
-    ),
-    instruction="You are a helpful AI assistant designed to provide accurate and useful information.",
-    tools=[get_weather, get_current_time],
+    description="Career assistant that tailors resumes and cover letters to jobs.",
+    model=FAST_MODEL,
+    instruction=prompts.COORDINATOR_INSTRUCTION,
+    tools=[
+        AgentTool(agent=profile_agent),
+        AgentTool(agent=job_matcher_agent),
+        AgentTool(agent=resume_tailoring_pipeline),
+        get_tailored_application_documents,
+    ],
+    generate_content_config=_PRECISE,
 )
 
 app = App(

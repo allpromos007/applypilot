@@ -1,0 +1,33 @@
+Senior Full Stack Engineer, Patient Experience - Remote (US)
+
+About us
+We build a virtual care platform used by hospitals and clinics to connect patients with
+care teams. Our engineers ship features that patients and clinicians rely on every day.
+
+The role
+As a Senior Full Stack Engineer on the Patient Experience team you will design and build
+patient-facing web applications and the APIs behind them, integrating with EHR systems
+through FHIR and HL7 interfaces.
+
+What you'll do
+- Build accessible, responsive patient and clinician experiences with React, TypeScript and Next.js.
+- Design and operate Node.js and Python services and RESTful / GraphQL APIs.
+- Integrate with Epic and Cerner using FHIR R4, SMART on FHIR and HL7 v2.
+- Protect PHI: implement HIPAA-compliant security controls, OAuth 2.0 / OIDC, RBAC and audit logging.
+- Own features end to end, from design through deployment on Google Cloud (GCP) with Kubernetes.
+- Improve reliability with automated testing (Jest, Playwright), CI/CD and observability.
+- Mentor engineers and collaborate with product, design and clinical stakeholders.
+
+What we're looking for
+- 4+ years of professional full stack software engineering experience.
+- Strong TypeScript, React and Node.js; working knowledge of Python.
+- Hands-on FHIR R4 or HL7 integration experience with EHR vendors.
+- Experience building HIPAA-compliant systems handling PHI.
+- PostgreSQL and Redis experience; Docker and Terraform.
+- Commitment to WCAG accessibility.
+
+Nice to have
+- Google Cloud (GCP), GKE or Kubernetes experience.
+- Real-time features with WebSockets or WebRTC (telehealth).
+- SOC 2 audit experience.
+- Experience with generative AI features in healthcare products.
