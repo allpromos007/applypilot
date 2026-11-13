@@ -61,6 +61,26 @@ class JobSearchConfig:
 
 
 @dataclass(frozen=True)
+class ApplicationConfig:
+    """Where applications are sent and the safety limits around them."""
+
+    # Local: http://localhost:8081. Cloud Run (M7): https://mock-ats-....run.app,
+    # called with a Google ID token because the service is IAM-protected.
+    mock_ats_url: str = field(
+        default_factory=lambda: os.getenv("MOCK_ATS_URL", "http://localhost:8081")
+    )
+    output_dir: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("APPLYPILOT_OUTPUT_DIR", str(PROJECT_ROOT / "output"))
+        )
+    )
+    max_applications_per_session: int = int(
+        os.getenv("APPLYPILOT_MAX_APPLICATIONS_PER_SESSION", "10")
+    )
+    http_timeout_seconds: float = float(os.getenv("MOCK_ATS_TIMEOUT", "20"))
+
+
+@dataclass(frozen=True)
 class Settings:
     project_id: str = field(
         default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT", "")
@@ -70,6 +90,7 @@ class Settings:
     )
     models: ModelConfig = field(default_factory=ModelConfig)
     jobs: JobSearchConfig = field(default_factory=JobSearchConfig)
+    applications: ApplicationConfig = field(default_factory=ApplicationConfig)
 
 
 def get_settings() -> Settings:

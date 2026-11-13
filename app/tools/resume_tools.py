@@ -11,6 +11,10 @@ from app.config import PROJECT_ROOT
 from app.tools.errors import ToolErrorCode, tool_error, validation_error
 from app.tools.schemas import ParsedResume, ParseResumeInput, ResumeSection
 from app.tools.text_analysis import (
+    EMAIL_RE,
+    GITHUB_RE,
+    LINKEDIN_RE,
+    PHONE_RE,
     REQUIRED_SECTIONS,
     clean_extracted_text,
     detect_sections,
@@ -42,6 +46,49 @@ def _read_docx(path: Path) -> str:
 def _resolve(path_str: str) -> Path:
     path = Path(path_str).expanduser()
     return path if path.is_absolute() else (PROJECT_ROOT / path)
+
+
+def _read_text(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return _read_pdf(path)
+    if suffix == ".docx":
+        return _read_docx(path)
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def extract_contact_details(file_path: str) -> dict[str, str]:
+    """Return the candidate's real name and contact details from the resume file.
+
+    NOT a model-facing tool. The model only ever sees [EMAIL]/[PHONE]/...
+    placeholders; these real values are used at the last moment to fill the
+    final .docx files and the ATS submission, and are never returned to the LLM.
+    Returns an empty dict if the file cannot be read.
+    """
+    try:
+        raw = clean_extracted_text(_read_text(_resolve(file_path)))
+    except Exception:
+        return {}
+    contact: dict[str, str] = {}
+    first_line = next((ln.strip() for ln in raw.splitlines() if ln.strip()), "")
+    if (
+        first_line
+        and len(first_line.split()) <= 5
+        and not any(c.isdigit() for c in first_line)
+    ):
+        contact["name"] = first_line
+    for key, regex in (
+        ("linkedin", LINKEDIN_RE),
+        ("github", GITHUB_RE),
+    ):
+        if m := regex.search(raw):
+            contact[key] = m.group(0).rstrip("/")
+            raw = raw.replace(m.group(0), " ")  # PDFs glue URLs onto emails
+    if m := EMAIL_RE.search(raw):
+        contact["email"] = m.group(0)
+    if m := PHONE_RE.search(raw):
+        contact["phone"] = m.group(0).strip()
+    return contact
 
 
 def parse_resume_document(file_path: str) -> dict[str, Any]:
@@ -88,12 +135,7 @@ def parse_resume_document(file_path: str) -> dict[str, Any]:
         )
 
     try:
-        if suffix == ".pdf":
-            raw = _read_pdf(path)
-        elif suffix == ".docx":
-            raw = _read_docx(path)
-        else:
-            raw = path.read_text(encoding="utf-8", errors="ignore")
+        raw = _read_text(path)
     except Exception as exc:  # corrupt / encrypted files
         return tool_error(
             ToolErrorCode.INTERNAL_ERROR,

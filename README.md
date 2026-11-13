@@ -93,3 +93,20 @@ Built-in telemetry exports to Cloud Trace, BigQuery, and Cloud Logging.
 
 This agent supports the [A2A Protocol](https://a2a-protocol.org/). Use the [A2A Inspector](https://github.com/a2aproject/a2a-inspector) to test interoperability.
 See the [A2A Inspector docs](https://github.com/a2aproject/a2a-inspector) for details.
+
+## Mock ATS (application endpoint)
+
+`mock_ats/` is a small FastAPI service that stands in for an employer's Applicant Tracking System, so `submit_job_application` has a real endpoint to call.
+
+| Response | When |
+|---|---|
+| `201` `{application_id, status: RECEIVED}` | Application accepted |
+| `409` `DUPLICATE_APPLICATION` | Same candidate email has already applied to this job |
+| `422` `VALIDATION_FAILED` | Missing or invalid fields/files, a non-.docx upload, or unresolved `[EMAIL]`-style placeholders |
+
+```bash
+uv run uvicorn mock_ats.main:app --port 8081       # start the Mock ATS locally
+uv run pytest mock_ats/tests                        # API tests
+```
+
+**Human approval (rubric 3.4):** `submit_job_application` always pauses with ADK's tool-confirmation request (`adk_request_confirmation`). Nothing is sent until the candidate approves in the UI. Each approve or reject decision is recorded in session state (`application_decisions`). The tool sits on the coordinator rather than inside an `AgentTool` specialist, because `AgentTool` discards its nested session and so cannot resume after an approval pause.

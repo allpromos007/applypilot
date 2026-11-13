@@ -13,22 +13,31 @@ State keys written here (single source of truth for the agent graph):
     target_job_url, target_job_description              <- select_target_job
     ats_score_before, ats_score_after                   <- score_resume_for_target_job
     tailoring_plan, tailored_resume, cover_letter       <- written by agents (output_key)
+    candidate_contact     (PII, never shown to model)   <- load_candidate_resume
+    application_package                                 <- prepare_application_package
+    application_history, application_decisions          <- submit_job_application
 """
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from google.adk.tools import ToolContext
 from pydantic import Field, ValidationError
 
+from app.config import get_settings
+from app.tools.application_tools import ApplicationAdapter, MockATSAdapter
 from app.tools.ats_tools import calculate_ats_match_score, extract_job_requirements
+from app.tools.document_tools import render_ats_docx
 from app.tools.errors import ToolErrorCode, tool_error, validation_error
 from app.tools.job_search_tools import (
     get_job_posting_details,
     search_matching_job_postings,
 )
-from app.tools.resume_tools import parse_resume_document
+from app.tools.resume_tools import extract_contact_details, parse_resume_document
 from app.tools.schemas import StrictModel, WorkplaceType
 
 
@@ -79,6 +88,9 @@ def load_candidate_resume(file_path: str, tool_context: ToolContext) -> dict[str
         tool_context.state["resume_missing_sections"] = result[
             "missing_standard_sections"
         ]
+        # Real contact details go to state for the final documents only. They
+        # are never injected into prompts or returned to the model.
+        tool_context.state["candidate_contact"] = extract_contact_details(file_path)
     return result
 
 
@@ -196,6 +208,7 @@ def select_target_job(job_id: str, tool_context: ToolContext) -> dict[str, Any]:
         "tailored_resume",
         "cover_letter",
         "ats_score_after",
+        "application_package",
     ):
         state[stale] = ""
     return {
@@ -240,6 +253,7 @@ def use_pasted_job_description(
         "tailored_resume",
         "cover_letter",
         "ats_score_after",
+        "application_package",
     ):
         state[stale] = ""
     return {"status": "success", "title": job_title, "company": company}
@@ -340,4 +354,221 @@ def get_tailored_application_documents(tool_context: ToolContext) -> dict[str, A
         "cover_letter": state.get("cover_letter", ""),
         "score_before": before.get("overall_score"),
         "score_after": after.get("overall_score"),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Applying (rubric 3.4: human-in-the-loop for high-stakes actions)
+# --------------------------------------------------------------------------- #
+# Swapped for a fake in unit tests; real ATS adapters can be plugged in later.
+ADAPTER_FACTORY: type[ApplicationAdapter] | Any = MockATSAdapter
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:60] or "job"
+
+
+def _ats_job_id(state: dict) -> str:
+    job_id = state.get("target_job_id", "")
+    if job_id == "pasted":  # pasted JDs have no board id; derive a stable one
+        return f"pasted:{_slug(state.get('target_company', ''))}:{_slug(state.get('target_job_title', ''))}"
+    return job_id
+
+
+def prepare_application_package(tool_context: ToolContext) -> dict[str, Any]:
+    """Create the final ATS-friendly Word files (resume + cover letter) for the selected job.
+
+    Call this after the tailoring pipeline has finished and BEFORE asking to
+    submit. Real contact details are filled in here and are never shown in chat.
+
+    Returns:
+        {"status": "success", "job_id", "target", "resume_file", "cover_letter_file",
+        "score_before", "score_after", "missing_contact_fields"} or a guided error.
+    """
+    state = tool_context.state
+    for key, fix in (
+        ("target_job_id", "Select a target job first."),
+        (
+            "tailored_resume",
+            "Run resume_tailoring_pipeline for the selected job first.",
+        ),
+        ("cover_letter", "Run resume_tailoring_pipeline for the selected job first."),
+    ):
+        if not state.get(key):
+            return _missing_state(key, fix)
+
+    contact = state.get("candidate_contact") or {}
+    job_id = _ats_job_id(state)
+    name = contact.get("name", "Candidate")
+    folder = (
+        get_settings().applications.output_dir
+        / "applications"
+        / _slug(
+            f"{state.get('target_company', '')}-{state.get('target_job_title', '')}"
+        )
+    )
+    try:
+        resume_path = render_ats_docx(
+            state["tailored_resume"], contact, folder / f"{_slug(name)}-resume.docx"
+        )
+        letter_path = render_ats_docx(
+            state["cover_letter"], contact, folder / f"{_slug(name)}-cover-letter.docx"
+        )
+    except Exception as exc:
+        return tool_error(
+            ToolErrorCode.INTERNAL_ERROR,
+            f"Could not create the Word documents: {type(exc).__name__}.",
+            "Tell the candidate the documents could not be generated; the text "
+            "versions are still available via get_tailored_application_documents.",
+        )
+
+    state["application_package"] = {
+        "job_id": job_id,
+        "target": f"{state.get('target_job_title')} at {state.get('target_company')}",
+        "resume_path": str(resume_path),
+        "cover_letter_path": str(letter_path),
+        "prepared_at": datetime.now(UTC).isoformat(),
+    }
+    before = (state.get("ats_score_before") or {}).get("overall_score")
+    after = (state.get("ats_score_after") or {}).get("overall_score")
+    return {
+        "status": "success",
+        "job_id": job_id,
+        "target": state["application_package"]["target"],
+        "resume_file": str(resume_path),
+        "cover_letter_file": str(letter_path),
+        "score_before": before,
+        "score_after": after,
+        "missing_contact_fields": [
+            k for k in ("name", "email", "phone") if not contact.get(k)
+        ],
+    }
+
+
+def submit_job_application(job_id: str, tool_context: ToolContext) -> dict[str, Any]:
+    """Submit the prepared application to the employer. HIGH-STAKES: needs the candidate's approval.
+
+    The first call does NOT submit. It pauses and asks the candidate to approve
+    or reject this specific application. Only after they approve does ADK call
+    this tool again and the application is sent. Never call this unless the
+    candidate has said they want to apply to this job.
+
+    Args:
+        job_id: The job_id returned by prepare_application_package, e.g.
+            "greenhouse:airbnb:8224032". Must match the prepared package.
+
+    Returns:
+        {"status": "pending_approval"} while waiting for the candidate;
+        {"status": "cancelled"} if they reject;
+        {"status": "success", "application_id", "job_id", "received_at"} on
+        submission; or a guided error with "recovery_instruction".
+    """
+    state = tool_context.state
+    package = state.get("application_package")
+    if not package:
+        return _missing_state(
+            "application_package",
+            "Call prepare_application_package first, show the candidate what will be "
+            "sent, then call submit_job_application.",
+        )
+    if job_id != package["job_id"]:
+        return tool_error(
+            ToolErrorCode.INVALID_INPUT,
+            f"job_id '{job_id}' does not match the prepared package ('{package['job_id']}').",
+            "Use the job_id from prepare_application_package, or prepare a package "
+            "for the other job first.",
+        )
+    history = list(state.get("application_history") or [])
+    if any(h["job_id"] == job_id for h in history):
+        return tool_error(
+            ToolErrorCode.DUPLICATE_APPLICATION,
+            "An application to this job was already submitted in this session.",
+            "Do NOT retry. Tell the candidate they already applied.",
+        )
+    limit = get_settings().applications.max_applications_per_session
+    if len(history) >= limit:
+        return tool_error(
+            ToolErrorCode.APPLICATION_LIMIT_REACHED,
+            f"The safety limit of {limit} applications per session has been reached.",
+            "Do not submit more. Tell the candidate about the limit.",
+        )
+    contact = state.get("candidate_contact") or {}
+    if not contact.get("email") or not contact.get("name"):
+        return tool_error(
+            ToolErrorCode.INVALID_INPUT,
+            "The resume has no name or email address, which employers require.",
+            "Ask the candidate to add their name and email to the resume file, "
+            "reload it with profile_agent, and prepare the package again.",
+        )
+
+    # ---- Human-in-the-loop gate ------------------------------------------- #
+    confirmation = getattr(tool_context, "tool_confirmation", None)
+    if confirmation is None:
+        before = (state.get("ats_score_before") or {}).get("overall_score")
+        after = (state.get("ats_score_after") or {}).get("overall_score")
+        tool_context.request_confirmation(
+            hint=(
+                f"Submit your application for {package['target']} ({job_id})? "
+                f"Files: {Path(package['resume_path']).name}, "
+                f"{Path(package['cover_letter_path']).name}. "
+                f"ATS score {before} -> {after}. Approve to send, reject to cancel."
+            ),
+            payload={"job_id": job_id},
+        )
+        tool_context.actions.skip_summarization = True
+        return {
+            "status": "pending_approval",
+            "message": "Waiting for the candidate to approve or reject this application.",
+        }
+
+    decisions = list(state.get("application_decisions") or [])
+    decisions.append(
+        {
+            "job_id": job_id,
+            "approved": bool(confirmation.confirmed),
+            "decided_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    state["application_decisions"] = decisions
+    if not confirmation.confirmed:
+        return {
+            "status": "cancelled",
+            "message": "The candidate rejected this submission. Nothing was sent.",
+        }
+
+    candidate = {
+        "full_name": contact["name"],
+        "email": contact["email"],
+        "phone": contact.get("phone"),
+        "linkedin_url": contact.get("linkedin"),
+    }
+    result = ADAPTER_FACTORY().submit(
+        job_id,
+        candidate,
+        Path(package["resume_path"]),
+        Path(package["cover_letter_path"]),
+    )
+    if result.get("status") == "success":
+        history.append(
+            {
+                "job_id": job_id,
+                "target": package["target"],
+                "application_id": result.get("application_id"),
+                "submitted_at": result.get("received_at"),
+            }
+        )
+        state["application_history"] = history
+    return result
+
+
+def get_application_history(tool_context: ToolContext) -> dict[str, Any]:
+    """List the applications submitted in this session and the candidate's approve/reject decisions.
+
+    Returns:
+        {"status": "success", "submitted": [...], "decisions": [...]}
+    """
+    return {
+        "status": "success",
+        "submitted": list(tool_context.state.get("application_history") or []),
+        "decisions": list(tool_context.state.get("application_decisions") or []),
     }

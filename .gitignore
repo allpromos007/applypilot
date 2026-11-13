@@ -218,3 +218,7 @@ credentials*.json
 
 # Files `scaffold enhance` moved aside from a repo it adopted.
 /.agents-cli-original/
+
+# ApplyPilot runtime output (generated documents, local Mock ATS data)
+output/
+.mock_ats_data/

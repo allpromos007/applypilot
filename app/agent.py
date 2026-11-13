@@ -23,6 +23,8 @@
         │   ├── resume_rewriter      (REASONING) tailored ATS resume
         │   └── cover_letter_writer  (REASONING) matching cover letter
         └── ats_rescorer             (FAST)   AFTER score + comparison
+    + prepare_application_package, submit_job_application (HUMAN APPROVAL),
+      get_application_history                 -> Mock ATS service
 
 Specialists are exposed to the coordinator as AgentTools, so the coordinator
 stays in control of the conversation and receives each specialist's result.
@@ -40,11 +42,14 @@ from app.config import get_settings
 from app.tools.session_tools import (
     extract_requirements_for_target_job,
     find_jobs_matching_saved_preferences,
+    get_application_history,
     get_tailored_application_documents,
     load_candidate_resume,
+    prepare_application_package,
     save_candidate_preferences,
     score_resume_for_target_job,
     select_target_job,
+    submit_job_application,
     use_pasted_job_description,
 )
 
@@ -164,6 +169,12 @@ root_agent = Agent(
         AgentTool(agent=job_matcher_agent),
         AgentTool(agent=resume_tailoring_pipeline),
         get_tailored_application_documents,
+        # Applying lives on the coordinator, not in an AgentTool specialist:
+        # submit_job_application pauses for human approval, and AgentTool
+        # discards its nested session, so it could never resume after approval.
+        prepare_application_package,
+        submit_job_application,
+        get_application_history,
     ],
     generate_content_config=_PRECISE,
 )
