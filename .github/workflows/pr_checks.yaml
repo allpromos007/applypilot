@@ -14,15 +14,13 @@
 
 name: PR Checks
 
+# Manual-only for now: this pipeline needs the CI/CD infrastructure from
+# `agents-cli infra cicd` (Workload Identity Federation + staging/prod projects).
+# This project is deployed with the single-project setup (see README); the
+# credential-free checks run in unit_tests.yaml on every push.
+# To enable: run `agents-cli infra cicd`, then restore the original trigger.
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'app/**'
-      - 'tests/**'
-      - 'deployment/**'
-      - 'uv.lock'
+  workflow_dispatch:
 
 jobs:
   test:
