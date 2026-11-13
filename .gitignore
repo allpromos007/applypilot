@@ -225,3 +225,6 @@ output/
 
 # Local ADK session/memory databases
 .adk/
+
+# Eval outputs (traces and grade results)
+artifacts/

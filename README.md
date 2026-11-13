@@ -135,3 +135,20 @@ jsonPayload.event_type=("AGENT_INTENT" OR "AGENT_OUTCOME") AND jsonPayload.high_
 | 3.3 Guardrails | [app/guardrails.py](app/guardrails.py) | Gemini safety settings; `SafetyGuardrailPlugin`: Google Cloud **Model Armor** (when `APPLYPILOT_MODEL_ARMOR_TEMPLATE` is set) plus a local prompt-injection detector on user input, job descriptions and final answers; a **truthfulness judge** (LLM-as-judge with a structured `TruthfulnessReview` output, supported by a deterministic check for new numbers). `prepare_application_package` refuses to build documents the judge failed. |
 
 **Privacy:** contact details are never stored in session state, memory or logs. Only the resume *path* is stored; the real details are re-read from the file at the moment the final documents and the ATS submission need them.
+
+## Evaluation and secrets
+
+### Evaluation suite (rubric 5.1)
+Two layers, both act as quality gates:
+
+| Layer | Run | What it checks |
+|---|---|---|
+| Golden regression (deterministic, runs in CI) | `uv run pytest tests/unit` | [tests/eval/golden/](tests/eval/golden): ATS-scorer baselines and invariants, truthfulness evidence, prompt-injection detection (attacks and false positives), PII redaction. No model calls, so every push is checked. |
+| Golden agent eval (LLM in the loop) | `MEMORY_SERVICE_URI=memory:// agents-cli eval run --dataset tests/eval/datasets/golden.json` (in-memory memory keeps cases independent) | 10 real conversations: scope, out-of-scope requests, prompt injection, no-resume, resume loading, fabrication requests, discriminatory filters, applying too early, contact-detail requests, and the full tailoring flow. Graded by `policy_compliance` (per-case criteria, LLM judge), `tool_expectations` (required and forbidden tools, deterministic), `no_pii_leak` (deterministic) and `custom_response_quality`. Thresholds are in [eval_config.yaml](tests/eval/eval_config.yaml); a regression exits 1. |
+
+Compare two runs: `agents-cli eval compare artifacts/grade_results/<old>.json artifacts/grade_results/<new>.json`.
+
+### Secrets (rubric 5.3)
+- [app/secrets.py](app/secrets.py): `get_secret()` reads from **Google Cloud Secret Manager** (`SecretManagerServiceClient`), falling back to an environment variable for local development only. Values are cached and never logged; only their source is.
+- The only secret, `mock-ats-api-key`, is sent as `X-API-Key` to the Mock ATS, which checks it in constant time. On Cloud Run it is injected with `--set-secrets MOCK_ATS_API_KEY=mock-ats-api-key:latest`.
+- `tests/unit/test_secrets.py::test_no_hardcoded_secrets_in_repo` scans every tracked file for API keys, tokens and private keys, and fails the build if it finds one. A pre-commit secret scanner also blocks key-shaped strings.

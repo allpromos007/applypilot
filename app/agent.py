@@ -73,13 +73,16 @@ FAST_MODEL = Gemini(model=settings.models.fast, retry_options=_RETRY)
 REASONING_MODEL = Gemini(model=settings.models.reasoning, retry_options=_RETRY)
 
 # Gemini safety settings: first guardrail layer on every model call (rubric 3.3).
+# Harassment/hate use BLOCK_ONLY_HIGH: at MEDIUM, ordinary career text (e.g.
+# "apply for me right now") was occasionally blocked in the golden eval.
+# Hate and harassment from users is also screened by Model Armor.
 _SAFETY = [
-    types.SafetySetting(category=c, threshold=types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE)
-    for c in (
-        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
-        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    types.SafetySetting(category=c, threshold=t)
+    for c, t in (
+        (types.HarmCategory.HARM_CATEGORY_HARASSMENT, types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
+        (types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, types.HarmBlockThreshold.BLOCK_ONLY_HIGH),
+        (types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE),
+        (types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE),
     )
 ]
 _PRECISE = types.GenerateContentConfig(temperature=0.1, safety_settings=_SAFETY)

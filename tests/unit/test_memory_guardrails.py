@@ -320,3 +320,27 @@ def test_judge_evidence_callback_writes_state():
     )
     prepare_truthfulness_evidence(ctx)
     assert ctx.state["unsupported_numbers"] == "45%"
+
+
+def test_gemini_safety_block_becomes_graceful_reply():
+    plugin = SafetyGuardrailPlugin(ModelArmorScreener(template=""))
+    blocked = SimpleNamespace(
+        finish_reason=types.FinishReason.SAFETY,
+        error_code="SAFETY",
+        content=None,
+        partial=False,
+    )
+    out = run(
+        plugin.after_model_callback(callback_context=_cb_ctx(), llm_response=blocked)
+    )
+    assert out.content.parts[0].text == guardrails.SAFETY_FALLBACK
+    fine = SimpleNamespace(
+        finish_reason=types.FinishReason.STOP,
+        error_code=None,
+        content=types.Content(role="model", parts=[types.Part(text="hi")]),
+        partial=False,
+    )
+    assert (
+        run(plugin.after_model_callback(callback_context=_cb_ctx(), llm_response=fine))
+        is None
+    )

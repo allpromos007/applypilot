@@ -13,6 +13,7 @@ Run locally:  uv run uvicorn mock_ats.main:app --port 8081
 
 from __future__ import annotations
 
+import hmac
 import io
 import json
 import os
@@ -72,6 +73,17 @@ def create_app(store: ApplicationStore | None = None) -> FastAPI:
             detail.get("message", ""),
             **detail.get("details", {}),
         )
+
+    expected_key = os.getenv("MOCK_ATS_API_KEY")  # injected from Secret Manager
+
+    @app.middleware("http")
+    async def _require_api_key(request: Request, call_next):
+        """When a key is configured, every route except /healthz requires it."""
+        if expected_key and request.url.path != "/healthz":
+            supplied = request.headers.get("x-api-key", "")
+            if not hmac.compare_digest(supplied.encode(), expected_key.encode()):
+                return _error(401, "UNAUTHORIZED", "Missing or invalid API key.")
+        return await call_next(request)
 
     @app.get("/healthz")
     def healthz() -> dict:

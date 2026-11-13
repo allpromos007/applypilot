@@ -17,6 +17,7 @@ import httpx
 
 from app.config import get_settings
 from app.observability.tracing import mark_outcome, trace_headers, traced
+from app.secrets import get_secret
 from app.tools.errors import ToolErrorCode, tool_error
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -75,6 +76,10 @@ class MockATSAdapter:
         try:
             # traceparent header -> the Mock ATS joins this same trace.
             headers = {**_id_token_headers(self.base_url), **trace_headers()}
+            # Application-level key from Secret Manager (defence in depth on top
+            # of Cloud Run IAM; the only auth when running locally).
+            if api_key := get_secret("mock-ats-api-key"):
+                headers["X-API-Key"] = api_key
             with (
                 httpx.Client(timeout=self.timeout, transport=self._transport) as client,
                 open(resume_path, "rb") as resume,
@@ -118,6 +123,15 @@ class MockATSAdapter:
                 "job_id": body.get("job_id", job_id),
                 "received_at": body.get("received_at"),
             }
+        if response.status_code in (401, 403):
+            return tool_error(
+                ToolErrorCode.ATS_UNAVAILABLE,
+                "The application system rejected ApplyPilot's credentials "
+                f"(HTTP {response.status_code}).",
+                "Nothing was submitted. This is a configuration problem, not the "
+                "candidate's fault: tell them applications are temporarily unavailable. "
+                "Do not retry.",
+            )
         if response.status_code == 409:
             return tool_error(
                 ToolErrorCode.DUPLICATE_APPLICATION,

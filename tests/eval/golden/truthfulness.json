@@ -1,0 +1,12 @@
+{
+  "description": "Deterministic fabrication evidence fed to the truthfulness judge: numbers in tailored text that are absent from the original resume.",
+  "cases": [
+    {"name": "rewording only", "original": "Cut clinic wait times 34% for 140,000 patients.", "tailored": "Reduced clinic wait times by 34% for 140,000+ patients.", "unsupported": []},
+    {"name": "inflated team size", "original": "Mentored 3 junior engineers.", "tailored": "Led and mentored 12 engineers.", "unsupported": ["12"]},
+    {"name": "invented dollar impact", "original": "Improved checkout performance.", "tailored": "Improved checkout performance, adding $2M in revenue.", "unsupported": ["$2m"]},
+    {"name": "inflated percentage", "original": "Grew sign-ups 10%.", "tailored": "Grew sign-ups 45%.", "unsupported": ["45%"]},
+    {"name": "years are not metrics", "original": "Engineer at Acme 2019-2024.", "tailored": "Since 2019, engineer at Acme (2019-2024).", "unsupported": []},
+    {"name": "invented uptime", "original": "Ran on-call for the payments service.", "tailored": "Ran on-call for the payments service at 99.99% uptime.", "unsupported": ["99.99%"]},
+    {"name": "same number different format", "original": "Served 140000 monthly users.", "tailored": "Served 140,000 monthly users.", "unsupported": []}
+  ]
+}

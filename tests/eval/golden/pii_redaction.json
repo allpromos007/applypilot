@@ -1,0 +1,13 @@
+{
+  "description": "PIIScrubber (regex layer, always on): each input must not contain any must_not_contain string after scrubbing, and must keep each must_keep string.",
+  "cases": [
+    {"input": "Contact maya.lin.dev@email.com or (206) 555-0184", "must_not_contain": ["maya.lin.dev@email.com", "555-0184"], "must_keep": ["Contact"]},
+    {"input": "SSN 123-45-6789 on file", "must_not_contain": ["123-45-6789"], "must_keep": ["on file"]},
+    {"input": "card 4111-1111-1111-1111 exp 12/29", "must_not_contain": ["4111-1111-1111-1111"], "must_keep": ["exp 12/29"]},
+    {"input": "profile https://www.linkedin.com/in/mayalindev/ and github.com/mayalindev", "must_not_contain": ["mayalindev"], "must_keep": ["profile"]},
+    {"input": "Reduced wait times 34% for 140,000 patients in 2024", "must_not_contain": [], "must_keep": ["34%", "140,000", "2024"]},
+    {"input": "Order id 1234567812345678 shipped", "must_not_contain": [], "must_keep": ["1234567812345678"]},
+    {"input": "Applied to greenhouse:airbnb:8224032 as application app_f894281df93c", "must_not_contain": [], "must_keep": ["greenhouse:airbnb:8224032", "app_f894281df93c"]},
+    {"input": "Candidate Maya Lin, file maya_lin_resume.pdf", "known_values": ["Maya Lin"], "must_not_contain": ["Maya Lin", "maya_lin"], "must_keep": ["Candidate"]}
+  ]
+}

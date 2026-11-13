@@ -1,0 +1,34 @@
+{
+  "description": "Regression baselines for the deterministic ATS scorer. Scores must stay within `tolerance` of the baseline unless the scorer is intentionally changed (then update the baseline in the same commit and explain why).",
+  "tolerance": 2.0,
+  "resumes": {
+    "jordan": "samples/resumes/jordan_avery_data_engineer.txt",
+    "maya": "samples/resumes/maya_lin_healthcare_full_stack.pdf"
+  },
+  "jobs": {
+    "data_eng": {"title": "Senior Data Engineer", "path": "samples/job_descriptions/senior_data_engineer_gcp.txt"},
+    "fullstack": {"title": "Senior Full Stack Engineer, Patient Experience", "path": "samples/job_descriptions/senior_full_stack_healthcare.txt"}
+  },
+  "baselines": [
+    {"resume": "jordan", "job": "data_eng", "overall": 61.2, "keyword_match": 34.2},
+    {"resume": "jordan", "job": "fullstack", "overall": 39.7, "keyword_match": 5.8},
+    {"resume": "maya", "job": "data_eng", "overall": 66.6, "keyword_match": 24.1},
+    {"resume": "maya", "job": "fullstack", "overall": 90.0, "keyword_match": 82.5}
+  ],
+  "invariants": [
+    {"name": "each resume scores best on the job it fits", "better": ["jordan", "data_eng"], "worse": ["jordan", "fullstack"]},
+    {"name": "each resume scores best on the job it fits", "better": ["maya", "fullstack"], "worse": ["maya", "data_eng"]},
+    {"name": "the better-fitting candidate wins the full stack job", "better": ["maya", "fullstack"], "worse": ["jordan", "fullstack"]},
+    {"name": "the data engineer has more data-engineering keywords", "metric": "keyword_match", "better": ["jordan", "data_eng"], "worse": ["maya", "data_eng"]}
+  ],
+  "honest_tailoring_cases": [
+    {
+      "name": "mirroring JD wording for skills the candidate has raises the score",
+      "title": "Data Engineer",
+      "job_description": "We need a Data Engineer with Python, SQL, Apache Airflow, BigQuery and dbt experience to build ETL pipelines and data models. You will own data quality and orchestration. Requirements: 3+ years building ETL pipelines in Python and SQL; experience with Apache Airflow and BigQuery; dbt is a plus.",
+      "before": "Jordan Avery\nSUMMARY\nEngineer who moves data around.\nSKILLS\nPython, databases, schedulers\nEXPERIENCE\nData Engineer, ShipCo  2020 - Present\n- Built jobs that load shipment data.\n- Moved cron scripts to a scheduler, cutting failed runs by 40%.\nEDUCATION\nB.S. Computer Science",
+      "after": "Jordan Avery\nSUMMARY\nData Engineer with 4 years building ETL pipelines in Python and SQL.\nSKILLS\nPython, SQL, Apache Airflow, BigQuery, ETL pipelines, data models\nEXPERIENCE\nData Engineer, ShipCo  2020 - Present\n- Built ETL pipelines in Python and SQL that load shipment data into BigQuery.\n- Migrated cron scripts to Apache Airflow orchestration, cutting failed runs by 40%.\nEDUCATION\nB.S. Computer Science",
+      "min_gain": 15
+    }
+  ]
+}

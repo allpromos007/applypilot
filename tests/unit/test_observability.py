@@ -39,7 +39,7 @@ run = asyncio.run
             "key " + "AIza" + "x" * 35,
             "API_KEY",
         ),  # built at runtime: no key-shaped literal in git
-        ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456", "TOKEN"),
+        ("Authorization: " + "Bearer " + "a" * 32, "TOKEN"),
         ("see linkedin.com/in/mayalindev", "LINKEDIN"),
         ("code at https://github.com/mayalindev", "GITHUB"),
     ],
