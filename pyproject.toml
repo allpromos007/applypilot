@@ -107,3 +107,10 @@ asyncio_default_fixture_loop_scope = "session"
 packages = ["app","frontend"]
 
 
+
+# Lock against public PyPI so remote builds (Agent Engine, Cloud Build, GitHub
+# Actions) can install dependencies regardless of the local machine's mirror.
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

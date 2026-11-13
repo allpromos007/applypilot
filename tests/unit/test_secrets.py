@@ -71,7 +71,7 @@ def secured_ats(tmp_path, monkeypatch):
 
 
 def test_mock_ats_rejects_missing_key(secured_ats):
-    assert secured_ats.get("/healthz").status_code == 200  # health stays open
+    assert secured_ats.get("/health").status_code == 200  # health stays open
     resp = secured_ats.get("/applications", params={"email": "a@b.co"})
     assert resp.status_code == 401
     assert resp.json()["error_code"] == "UNAUTHORIZED"

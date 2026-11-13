@@ -151,6 +151,14 @@ def redact_with_dlp(text: str, project_id: str) -> str:
     return response.item.value
 
 
+_PERMANENT_DLP_ERRORS = {
+    "PermissionDenied",
+    "Unauthenticated",
+    "NotFound",
+    "FailedPrecondition",
+}
+
+
 class PIIScrubber:
     """Redacts PII from strings and nested structures before storage."""
 
@@ -176,10 +184,15 @@ class PIIScrubber:
             try:
                 text = redact_with_dlp(text, self.project_id)
             except Exception as exc:  # never let redaction break the request
-                self._dlp_failed = True  # stop retrying a broken DLP for this process
+                # Permanent problems (API disabled, no permission): stop calling
+                # DLP for this process. Anything else is per-request: retry next time.
+                permanent = type(exc).__name__ in _PERMANENT_DLP_ERRORS
+                self._dlp_failed = self._dlp_failed or permanent
                 _log.warning(
-                    "Cloud DLP unavailable, using regex redaction only: %s",
+                    "Cloud DLP %s, using regex redaction for this text: %s %s",
+                    "disabled" if permanent else "call failed",
                     type(exc).__name__,
+                    str(getattr(exc, "message", ""))[:200],
                 )
         return redact_with_regex(text)  # always run: belt and braces
 
@@ -208,8 +221,19 @@ class PIIScrubber:
 
 @cache
 def get_scrubber() -> PIIScrubber:
-    """Process-wide scrubber (DLP client is created lazily on first use)."""
+    """Scrubber for storage pipelines (long-term memory): Cloud DLP + regex."""
     return PIIScrubber()
+
+
+@cache
+def get_log_scrubber() -> PIIScrubber:
+    """Scrubber for the logging hot path: regex + known values only.
+
+    Every log line passes through this synchronously, so it must be fast and
+    never make a network call. DLP's free-text detection is used on the memory
+    pipeline, where it runs in a background worker thread.
+    """
+    return PIIScrubber(use_dlp=False)
 
 
 def known_pii_from_state(state: Any) -> list[str]:

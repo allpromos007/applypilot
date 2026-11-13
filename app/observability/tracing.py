@@ -21,7 +21,7 @@ from typing import Any
 from opentelemetry import propagate, trace
 from opentelemetry.trace import Span, Status, StatusCode
 
-from app.observability.pii import get_scrubber
+from app.observability.pii import get_log_scrubber as get_scrubber
 
 tracer = trace.get_tracer("applypilot")
 

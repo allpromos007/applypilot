@@ -79,12 +79,15 @@ def create_app(store: ApplicationStore | None = None) -> FastAPI:
     @app.middleware("http")
     async def _require_api_key(request: Request, call_next):
         """When a key is configured, every route except /healthz requires it."""
-        if expected_key and request.url.path != "/healthz":
+        if expected_key and request.url.path not in ("/health", "/healthz"):
             supplied = request.headers.get("x-api-key", "")
             if not hmac.compare_digest(supplied.encode(), expected_key.encode()):
                 return _error(401, "UNAUTHORIZED", "Missing or invalid API key.")
         return await call_next(request)
 
+    # Cloud Run reserves paths ending in "z" (e.g. /healthz), so /health is the
+    # one to use there; /healthz is kept for local tooling.
+    @app.get("/health")
     @app.get("/healthz")
     def healthz() -> dict:
         return {"status": "ok"}

@@ -22,7 +22,7 @@ from typing import Any
 
 from opentelemetry import trace
 
-from app.observability.pii import get_scrubber
+from app.observability.pii import get_log_scrubber
 
 _CONFIGURED = False
 LOGGER_ROOT = "applypilot"
@@ -40,7 +40,7 @@ class PIIRedactionFilter(logging.Filter):
     """Scrubs the message and structured fields of every record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        scrubber = get_scrubber()
+        scrubber = get_log_scrubber()
         known = getattr(record, "known_pii", ()) or ()
         record.msg = scrubber.scrub_text(record.getMessage(), known)
         record.args = ()

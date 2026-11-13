@@ -86,8 +86,11 @@ def test_dlp_is_used_when_enabled(monkeypatch):
 
 
 def test_dlp_failure_falls_back_to_regex(monkeypatch):
+    class PermissionDenied(Exception):  # same class name as google.api_core's
+        pass
+
     def broken(text, project_id):
-        raise RuntimeError("DLP API disabled")
+        raise PermissionDenied("DLP API disabled")
 
     monkeypatch.setattr(pii, "redact_with_dlp", broken)
     scrubber = PIIScrubber(use_dlp=True, project_id="p")
@@ -287,3 +290,34 @@ def test_known_name_redacted_in_file_names():
         "file maya_lin_resume.pdf / maya-lin", known_values=["Maya Lin"]
     )
     assert "maya" not in out.lower()
+
+
+def test_transient_dlp_error_does_not_disable_dlp(monkeypatch):
+    class InvalidArgument(Exception):
+        message = "bad request"
+
+    calls = []
+
+    def flaky(text, project_id):
+        calls.append(1)
+        if len(calls) == 1:
+            raise InvalidArgument()
+        return text
+
+    monkeypatch.setattr(pii, "redact_with_dlp", flaky)
+    scrubber = PIIScrubber(use_dlp=True, project_id="p")
+    scrubber.scrub_text("first text that is long enough for dlp")
+    scrubber.scrub_text("second text that is long enough for dlp")
+    assert len(calls) == 2 and not scrubber._dlp_failed
+
+
+def test_logging_path_never_calls_dlp(monkeypatch):
+    monkeypatch.setattr(
+        pii,
+        "redact_with_dlp",
+        lambda *a: (_ for _ in ()).throw(AssertionError("DLP on hot path")),
+    )
+    assert not pii.get_log_scrubber().use_dlp
+    assert "[REDACTED_EMAIL]" in pii.get_log_scrubber().scrub_text(
+        "mail maya@example.com now please"
+    )

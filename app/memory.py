@@ -141,7 +141,9 @@ async def consolidate_memory(memory_service: Any, session: Session) -> None:
     """The background job. Never raises: memory is best-effort."""
     start = time.perf_counter()
     try:
-        scrubbed = scrubbed_session_for_memory(session)
+        # Cloud DLP calls are blocking network I/O: run them in a worker thread
+        # so the event loop keeps serving the candidate.
+        scrubbed = await asyncio.to_thread(scrubbed_session_for_memory, session)
         await memory_service.add_session_to_memory(scrubbed)
         log_event(
             logger,

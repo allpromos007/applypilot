@@ -28,7 +28,8 @@ from google.adk.plugins.base_plugin import BasePlugin
 from opentelemetry import trace
 
 from app.observability.logging import get_logger, log_event
-from app.observability.pii import get_scrubber, known_pii_from_state
+from app.observability.pii import get_log_scrubber as get_scrubber
+from app.observability.pii import known_pii_from_state
 
 logger = get_logger(__name__)
 
