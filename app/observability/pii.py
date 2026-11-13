@@ -168,7 +168,13 @@ class PIIScrubber:
             if use_dlp is not None
             else os.getenv("APPLYPILOT_USE_DLP", "false").lower() in ("1", "true")
         )
-        self.project_id = project_id or os.getenv("GOOGLE_CLOUD_PROJECT", "")
+        # Agent Engine sets GOOGLE_CLOUD_PROJECT to the project NUMBER, which the
+        # DLP API rejects ("Malformed parent field"); prefer an explicit ID.
+        self.project_id = (
+            project_id
+            or os.getenv("APPLYPILOT_PROJECT_ID")
+            or os.getenv("GOOGLE_CLOUD_PROJECT", "")
+        )
         self._dlp_failed = False
 
     def scrub_text(self, text: str, known_values: Iterable[str] = ()) -> str:

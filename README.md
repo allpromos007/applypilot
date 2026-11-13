@@ -128,7 +128,7 @@ gcloud run deploy mock-ats --source mock_ats --region us-central1 \
 
 # 3. Agent to Agent Engine (values from `terraform output`)
 agents-cli deploy --project <PROJECT_ID> --region us-central1 --env-vars \
-  "MOCK_ATS_URL=<mock_ats_url>,APPLYPILOT_MODEL_ARMOR_TEMPLATE=<model_armor_template>,APPLYPILOT_USE_DLP=true,APPLYPILOT_OUTPUT_DIR=/tmp/applypilot"
+  "MOCK_ATS_URL=<mock_ats_url>,APPLYPILOT_MODEL_ARMOR_TEMPLATE=<model_armor_template>,APPLYPILOT_USE_DLP=true,APPLYPILOT_PROJECT_ID=<PROJECT_ID>,APPLYPILOT_OUTPUT_DIR=/tmp/applypilot"
 ```
 For a full CI/CD pipeline (staging → prod with Workload Identity Federation), run `agents-cli infra cicd`; the workflows are in [.github/workflows/](.github/workflows).
 

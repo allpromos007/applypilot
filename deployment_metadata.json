@@ -1,20 +1,20 @@
 {
   "remote_agent_runtime_id": "projects/226300902554/locations/us-central1/reasoningEngines/4912804045246169088",
-  "deployment_timestamp": "2026-11-13T08:59:36.234182+00:00",
+  "deployment_timestamp": "2026-11-13T09:11:07.958938+00:00",
   "deployment_target": "agent_runtime",
   "is_a2a": true,
   "language": "python",
   "agent_directory": "app",
   "app_name": "app",
   "pending_operation": {
-    "owner_id": "3daa5f7357fc40178f9122318106d005",
+    "owner_id": "22fa119115e04dbf823b29ce5a6ba1d9",
     "state": "running",
-    "operation_name": "projects/226300902554/locations/us-central1/reasoningEngines/4912804045246169088/operations/2851999412874379264",
+    "operation_name": "projects/226300902554/locations/us-central1/reasoningEngines/4912804045246169088/operations/8946636346101858304",
     "project": "l200capstone",
     "location": "us-central1",
     "deployment_target": "agent_runtime",
-    "started_at": "2026-11-13T09:08:01.770703+00:00",
-    "owner_pid": 2716932,
+    "started_at": "2026-11-13T09:14:43.989040+00:00",
+    "owner_pid": 2720563,
     "owner_host": "sales-velocity.c.googlers.com"
   }
 }
