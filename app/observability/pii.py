@@ -169,7 +169,9 @@ class PIIScrubber:
         for value in sorted(
             {v for v in known_values if v and len(v) >= 3}, key=len, reverse=True
         ):
-            text = re.sub(re.escape(value), "[REDACTED_KNOWN_PII]", text, flags=re.I)
+            # "Maya Lin" also matches "maya_lin", "maya-lin", "maya.lin" (file names, URLs).
+            pattern = r"[\s_.\-]+".join(re.escape(w) for w in value.split())
+            text = re.sub(pattern, "[REDACTED_KNOWN_PII]", text, flags=re.I)
         if self.use_dlp and self.project_id and not self._dlp_failed and len(text) > 20:
             try:
                 text = redact_with_dlp(text, self.project_id)
@@ -213,7 +215,9 @@ def get_scrubber() -> PIIScrubber:
 def known_pii_from_state(state: Any) -> list[str]:
     """Real contact values we hold for the candidate; always redacted verbatim."""
     try:
-        contact = state.get("candidate_contact") or {}
+        from app.tools.session_tools import candidate_contact
+
+        contact = candidate_contact(state)
     except Exception:
         return []
     return [str(v) for v in contact.values() if v]

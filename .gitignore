@@ -222,3 +222,6 @@ credentials*.json
 # ApplyPilot runtime output (generated documents, local Mock ATS data)
 output/
 .mock_ats_data/
+
+# Local ADK session/memory databases
+.adk/

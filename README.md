@@ -124,3 +124,14 @@ Example: find every high-stakes action and what happened to it.
 ```
 jsonPayload.event_type=("AGENT_INTENT" OR "AGENT_OUTCOME") AND jsonPayload.high_stakes=true
 ```
+
+## Memory, context and guardrails
+
+| Rubric | Where | What it does |
+|---|---|---|
+| 2.2 History compaction | [app/context_management.py](app/context_management.py) | ADK `EventsCompactionConfig`: the fast model summarises older turns every 5 user turns, or once a prompt passes 60k tokens. Also `ContextBudgetPlugin`, a `before_model_callback` sliding window that, once the prompt exceeds a token budget, swaps large old tool outputs (job lists, parsed resumes) for short stubs. The session itself is never modified. |
+| 2.3 Persistent state | [app/app_utils/services.py](app/app_utils/services.py) | Sessions: `VertexAiSessionService` on Agent Engine, SQLite locally (`.adk/sessions.db`). Memory: Vertex AI Memory Bank on Agent Engine, SQLite full-text search locally. `user:application_history` is shared across all of a user's sessions, so duplicate applications are blocked even in a new conversation. The coordinator recalls past sessions with `preload_memory` and `load_memory`. |
+| 2.4 Async memory | [app/memory.py](app/memory.py) | `MemoryConsolidationPlugin.after_run_callback` uses `asyncio.create_task(...)` to scrub PII, build a profile summary and write to memory in the background. It only runs when something worth remembering has changed, and never delays the response. |
+| 3.3 Guardrails | [app/guardrails.py](app/guardrails.py) | Gemini safety settings; `SafetyGuardrailPlugin`: Google Cloud **Model Armor** (when `APPLYPILOT_MODEL_ARMOR_TEMPLATE` is set) plus a local prompt-injection detector on user input, job descriptions and final answers; a **truthfulness judge** (LLM-as-judge with a structured `TruthfulnessReview` output, supported by a deterministic check for new numbers). `prepare_application_package` refuses to build documents the judge failed. |
+
+**Privacy:** contact details are never stored in session state, memory or logs. Only the resume *path* is stored; the real details are re-read from the file at the moment the final documents and the ATS submission need them.

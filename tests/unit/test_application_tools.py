@@ -154,6 +154,11 @@ def ready_ctx():
         cover_letter="Dear Hiring Team at Acme Health,\nThanks.\nMaya Lin | [EMAIL]",
         ats_score_before={"overall_score": 70.0},
         ats_score_after={"overall_score": 88.0},
+        truthfulness_review={
+            "verdict": "PASS",
+            "unsupported_claims": [],
+            "summary": "ok",
+        },
     )
     return ctx
 
@@ -161,7 +166,11 @@ def ready_ctx():
 def test_resume_load_keeps_real_contact_out_of_model_output(ready_ctx):
     result = session_tools.load_candidate_resume(MAYA, ready_ctx)
     assert "maya.lin.dev@email.com" not in json.dumps(result)
-    assert ready_ctx.state["candidate_contact"]["email"] == "maya.lin.dev@email.com"
+    assert "maya.lin.dev@email.com" not in json.dumps(
+        dict(ready_ctx.state), default=str
+    )
+    contact = session_tools.candidate_contact(ready_ctx.state)
+    assert contact["email"] == "maya.lin.dev@email.com"  # available on demand
 
 
 def test_submit_requires_prepared_package(ready_ctx):
@@ -180,13 +189,13 @@ def test_full_apply_flow_with_approval(ats, ready_ctx):
     pending = session_tools.submit_job_application(pkg["job_id"], ready_ctx)
     assert pending["status"] == "pending_approval"
     assert "Acme Health" in ready_ctx.requested["hint"]
-    assert "application_history" not in ready_ctx.state
+    assert "user:application_history" not in ready_ctx.state
 
     # Candidate approves -> ADK calls the tool again with the confirmation.
     ready_ctx.tool_confirmation = SimpleNamespace(confirmed=True)
     done = session_tools.submit_job_application(pkg["job_id"], ready_ctx)
     assert done["status"] == "success" and done["application_id"].startswith("app_")
-    assert ready_ctx.state["application_decisions"][-1]["approved"] is True
+    assert ready_ctx.state["user:application_decisions"][-1]["approved"] is True
 
     stored = ats.get(f"/applications/{done['application_id']}").json()
     assert stored["candidate"]["email"] == "maya.lin.dev@email.com"
@@ -201,8 +210,8 @@ def test_rejection_sends_nothing(ats, ready_ctx):
     ready_ctx.tool_confirmation = SimpleNamespace(confirmed=False)
     result = session_tools.submit_job_application(pkg["job_id"], ready_ctx)
     assert result["status"] == "cancelled"
-    assert not ready_ctx.state.get("application_history")
-    assert ready_ctx.state["application_decisions"][-1]["approved"] is False
+    assert not ready_ctx.state.get("user:application_history")
+    assert ready_ctx.state["user:application_decisions"][-1]["approved"] is False
     assert (
         ats.get("/applications", params={"email": "maya.lin.dev@email.com"}).json()
         == []
@@ -214,7 +223,9 @@ def test_ats_duplicate_409_is_surfaced_as_guided_error(ats, ready_ctx):
     pkg = session_tools.prepare_application_package(ready_ctx)
     ready_ctx.tool_confirmation = SimpleNamespace(confirmed=True)
     session_tools.submit_job_application(pkg["job_id"], ready_ctx)
-    ready_ctx.state["application_history"] = []  # new session forgets local history
+    ready_ctx.state[
+        "user:application_history"
+    ] = []  # new session forgets local history
     result = session_tools.submit_job_application(pkg["job_id"], ready_ctx)
     assert result["error_code"] == ToolErrorCode.DUPLICATE_APPLICATION
     assert result["details"]["existing_application_id"].startswith("app_")
@@ -224,3 +235,27 @@ def test_job_id_mismatch_is_rejected(ats, ready_ctx):
     session_tools.prepare_application_package(ready_ctx)
     result = session_tools.submit_job_application("lever:other:1", ready_ctx)
     assert result["error_code"] == ToolErrorCode.INVALID_INPUT
+
+
+def test_package_blocked_when_truthfulness_judge_fails(ats, ready_ctx):
+    claim = {
+        "document": "resume",
+        "claim": "Led 12 engineers",
+        "reason": "Not in original",
+    }
+    ready_ctx.state["truthfulness_review"] = {
+        "verdict": "FAIL",
+        "unsupported_claims": [claim],
+        "summary": "One fabricated claim.",
+    }
+    result = session_tools.prepare_application_package(ready_ctx)
+    assert result["error_code"] == ToolErrorCode.TRUTHFULNESS_CHECK_FAILED
+    assert result["details"]["unsupported_claims"] == [claim]
+    assert "application_package" not in ready_ctx.state
+
+
+def test_package_requires_a_review(ats, ready_ctx):
+    del ready_ctx.state["truthfulness_review"]
+    result = session_tools.prepare_application_package(ready_ctx)
+    assert result["status"] == "error"
+    assert "truthfulness" in result["recovery_instruction"]

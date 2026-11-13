@@ -30,6 +30,7 @@ from google.adk.cli.utils.service_factory import create_session_service_from_opt
 
 SESSION_SERVICE_URI = "shared://session"
 ARTIFACT_SERVICE_URI = "shared://artifact"
+MEMORY_SERVICE_URI = "shared://memory"
 
 _AGENT_DIR = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,9 +55,46 @@ def get_session_service():
             or os.environ.get("GOOGLE_CLOUD_LOCATION"),
             agent_engine_id=agent_engine_id,
         )
-    from google.adk.sessions.in_memory_session_service import InMemorySessionService
+    from google.adk.sessions.sqlite_session_service import SqliteSessionService
 
-    return InMemorySessionService()
+    # Local default: persistent SQLite, so conversations survive restarts
+    # (rubric 2.3). Agent Engine uses VertexAiSessionService above.
+    db_dir = os.path.join(_AGENT_DIR, ".adk")
+    os.makedirs(db_dir, exist_ok=True)
+    return SqliteSessionService(db_path=os.path.join(db_dir, "sessions.db"))
+
+
+@functools.cache
+def get_memory_service():
+    """Long-term memory shared by every serving surface (rubric 2.3 / 2.4).
+
+    - Agent Engine: Vertex AI Memory Bank (LLM-extracted, semantically searched
+      memories scoped per user).
+    - Local: persistent SQLite memory with full-text search.
+    - MEMORY_SERVICE_URI overrides both (e.g. "agentengine://<id>").
+    """
+    if uri := os.environ.get("MEMORY_SERVICE_URI"):
+        from google.adk.cli.utils.service_factory import (
+            create_memory_service_from_options,
+        )
+
+        return create_memory_service_from_options(
+            base_dir=_AGENT_DIR, memory_service_uri=uri
+        )
+    if agent_engine_id := os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_ID"):
+        from google.adk.memory import VertexAiMemoryBankService
+
+        return VertexAiMemoryBankService(
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            location=os.environ.get("GOOGLE_CLOUD_AGENT_ENGINE_LOCATION")
+            or os.environ.get("GOOGLE_CLOUD_LOCATION"),
+            agent_engine_id=agent_engine_id,
+        )
+    from google.adk.memory._sqlite_memory_service import SqliteMemoryService
+
+    db_dir = os.path.join(_AGENT_DIR, ".adk")
+    os.makedirs(db_dir, exist_ok=True)
+    return SqliteMemoryService(db_path=os.path.join(db_dir, "memory.db"))
 
 
 @functools.cache
@@ -70,3 +108,4 @@ def get_artifact_service():
 _registry = get_service_registry()
 _registry.register_session_service("shared", lambda uri, **kw: get_session_service())
 _registry.register_artifact_service("shared", lambda uri, **kw: get_artifact_service())
+_registry.register_memory_service("shared", lambda uri, **kw: get_memory_service())

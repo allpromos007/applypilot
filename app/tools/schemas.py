@@ -8,6 +8,7 @@ and what it receives back are constrained and self-describing.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -192,3 +193,19 @@ class AtsScoreOutput(StrictModel):
     matched_keywords: list[str]
     missing_keywords: list[str]
     recommendations: list[str]
+
+
+class UnsupportedClaim(StrictModel):
+    """One statement in the tailored documents that the original resume does not support."""
+
+    document: Literal["resume", "cover_letter"]
+    claim: str = Field(description="The exact phrase from the tailored document.")
+    reason: str = Field(description="Why the original resume does not support it.")
+
+
+class TruthfulnessReview(StrictModel):
+    """Structured output of the truthfulness judge (LLM-as-judge guardrail)."""
+
+    verdict: Literal["PASS", "FAIL"]
+    unsupported_claims: list[UnsupportedClaim] = Field(default_factory=list)
+    summary: str = Field(description="One sentence explaining the verdict.")

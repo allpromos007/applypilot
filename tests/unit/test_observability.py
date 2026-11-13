@@ -145,7 +145,7 @@ def _tool_ctx(call_id="fc-1", confirmation=None):
         invocation_id="inv-1",
         agent_name="applypilot",
         session=SimpleNamespace(id="sess-1"),
-        state={"candidate_contact": {"name": "Maya Lin", "email": "maya@example.com"}},
+        state={"resume_path": "samples/resumes/maya_lin_healthcare_full_stack.pdf"},
         tool_confirmation=confirmation,
         actions=SimpleNamespace(state_delta={"application_history": []}),
     )
@@ -158,7 +158,7 @@ def test_intent_and_outcome_are_paired_and_scrubbed(log_lines):
         description="Submit the prepared application.\nMore details.",
     )
     ctx = _tool_ctx(confirmation=SimpleNamespace(confirmed=True))
-    args = {"job_id": "greenhouse:acme:42", "note": "from maya@example.com"}
+    args = {"job_id": "greenhouse:acme:42", "note": "from maya.lin.dev@email.com"}
     run(plugin.before_tool_callback(tool=tool, tool_args=args, tool_context=ctx))
     run(
         plugin.after_tool_callback(
@@ -183,7 +183,7 @@ def test_intent_and_outcome_are_paired_and_scrubbed(log_lines):
     assert outcome["result_summary"]["note"] == "[REDACTED_KNOWN_PII]"
     assert isinstance(outcome["latency_ms"], int)
     assert outcome["session_id"] == "sess-1"
-    assert "maya@example.com" not in json.dumps([intent, outcome])
+    assert "maya.lin.dev@email.com" not in json.dumps([intent, outcome])
 
 
 def test_error_outcome_carries_error_code(log_lines):
@@ -271,7 +271,7 @@ def test_ats_call_is_traced_and_propagates_traceparent(spans, tmp_path):
 def test_mock_ats_log_line_joins_the_trace(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "l200capstone")
     record = logging.LogRecord(
-        "mock_ats", logging.INFO, __file__, 1, "from maya@example.com", (), None
+        "mock_ats", logging.INFO, __file__, 1, "from maya.lin.dev@email.com", (), None
     )
     record.trace_id = "0af7651916cd43dd8448eb211c80319c"
     record.fields = {"event_type": "HTTP_REQUEST"}
@@ -280,3 +280,10 @@ def test_mock_ats_log_line_joins_the_trace(monkeypatch):
         "projects/l200capstone/traces/0af7651916cd43dd8448eb211c80319c"
     )
     assert line["message"] == "from [REDACTED_EMAIL]"
+
+
+def test_known_name_redacted_in_file_names():
+    out = REGEX_ONLY.scrub_text(
+        "file maya_lin_resume.pdf / maya-lin", known_values=["Maya Lin"]
+    )
+    assert "maya" not in out.lower()

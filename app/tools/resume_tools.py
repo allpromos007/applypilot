@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,22 @@ def _read_text(path: Path) -> str:
 
 
 def extract_contact_details(file_path: str) -> dict[str, str]:
+    """Cached wrapper around `_extract_contact_details` (re-reads if the file changes)."""
+    try:
+        path = _resolve(file_path)
+        return dict(_extract_contact_details_cached(str(path), path.stat().st_mtime))
+    except OSError:
+        return {}
+
+
+@lru_cache(maxsize=32)
+def _extract_contact_details_cached(
+    path: str, _mtime: float
+) -> tuple[tuple[str, str], ...]:
+    return tuple(_extract_contact_details(path).items())
+
+
+def _extract_contact_details(file_path: str) -> dict[str, str]:
     """Return the candidate's real name and contact details from the resume file.
 
     NOT a model-facing tool. The model only ever sees [EMAIL]/[PHONE]/...

@@ -13,9 +13,12 @@ State keys written here (single source of truth for the agent graph):
     target_job_url, target_job_description              <- select_target_job
     ats_score_before, ats_score_after                   <- score_resume_for_target_job
     tailoring_plan, tailored_resume, cover_letter       <- written by agents (output_key)
-    candidate_contact     (PII, never shown to model)   <- load_candidate_resume
+    resume_path  (contact details are re-read from the file on demand; PII
+                  is never stored in session state)  <- load_candidate_resume
     application_package                                 <- prepare_application_package
-    application_history, application_decisions          <- submit_job_application
+    user:application_history, user:application_decisions <- submit_job_application
+        (user: prefix = shared across ALL of this user's sessions, so duplicate
+         applications are blocked even in a new conversation)
 """
 
 from __future__ import annotations
@@ -55,6 +58,12 @@ class CandidatePreferences(StrictModel):
     lever_companies: list[str] = Field(default_factory=list)
 
 
+def candidate_contact(state: Any) -> dict[str, str]:
+    """Real name/contact details, read from the resume file on demand (never stored)."""
+    path = state.get("resume_path") if state else None
+    return extract_contact_details(path) if path else {}
+
+
 def _missing_state(key: str, fix: str) -> dict[str, Any]:
     return tool_error(
         ToolErrorCode.INVALID_INPUT,
@@ -89,9 +98,10 @@ def load_candidate_resume(file_path: str, tool_context: ToolContext) -> dict[str
         tool_context.state["resume_missing_sections"] = result[
             "missing_standard_sections"
         ]
-        # Real contact details go to state for the final documents only. They
-        # are never injected into prompts or returned to the model.
-        tool_context.state["candidate_contact"] = extract_contact_details(file_path)
+        # Only the PATH is stored. Real contact details are re-read from the
+        # file at the moment they're needed (final .docx, ATS submission), so
+        # they are never persisted in session storage, prompts or logs.
+        tool_context.state["resume_path"] = file_path
     return result
 
 
@@ -210,6 +220,8 @@ def select_target_job(job_id: str, tool_context: ToolContext) -> dict[str, Any]:
         "cover_letter",
         "ats_score_after",
         "application_package",
+        "truthfulness_review",
+        "jd_security_flags",
     ):
         state[stale] = ""
     return {
@@ -255,6 +267,8 @@ def use_pasted_job_description(
         "cover_letter",
         "ats_score_after",
         "application_package",
+        "truthfulness_review",
+        "jd_security_flags",
     ):
         state[stale] = ""
     return {"status": "success", "title": job_title, "company": company}
@@ -355,6 +369,8 @@ def get_tailored_application_documents(tool_context: ToolContext) -> dict[str, A
         "cover_letter": state.get("cover_letter", ""),
         "score_before": before.get("overall_score"),
         "score_after": after.get("overall_score"),
+        "truthfulness_review": state.get("truthfulness_review")
+        or {"verdict": "NOT_RUN"},
     }
 
 
@@ -398,7 +414,25 @@ def prepare_application_package(tool_context: ToolContext) -> dict[str, Any]:
         if not state.get(key):
             return _missing_state(key, fix)
 
-    contact = state.get("candidate_contact") or {}
+    # Guardrail gate (rubric 3.3): never package documents the judge did not pass.
+    review = state.get("truthfulness_review")
+    if not isinstance(review, dict):
+        return _missing_state(
+            "truthfulness_review",
+            "Run resume_tailoring_pipeline again so the truthfulness judge can "
+            "review the documents.",
+        )
+    if review.get("verdict") != "PASS":
+        return tool_error(
+            ToolErrorCode.TRUTHFULNESS_CHECK_FAILED,
+            "The truthfulness judge found claims the original resume does not support.",
+            "Do not apply. Show the candidate each unsupported claim. If a claim is "
+            "true, ask them to add it to their resume file and reload it; otherwise "
+            "re-run resume_tailoring_pipeline. Then prepare the package again.",
+            unsupported_claims=review.get("unsupported_claims", []),
+        )
+
+    contact = candidate_contact(state)
     job_id = _ats_job_id(state)
     name = contact.get("name", "Candidate")
     folder = (
@@ -482,7 +516,7 @@ def submit_job_application(job_id: str, tool_context: ToolContext) -> dict[str, 
             "Use the job_id from prepare_application_package, or prepare a package "
             "for the other job first.",
         )
-    history = list(state.get("application_history") or [])
+    history = list(state.get("user:application_history") or [])
     if any(h["job_id"] == job_id for h in history):
         return tool_error(
             ToolErrorCode.DUPLICATE_APPLICATION,
@@ -496,7 +530,7 @@ def submit_job_application(job_id: str, tool_context: ToolContext) -> dict[str, 
             f"The safety limit of {limit} applications per session has been reached.",
             "Do not submit more. Tell the candidate about the limit.",
         )
-    contact = state.get("candidate_contact") or {}
+    contact = candidate_contact(state)
     if not contact.get("email") or not contact.get("name"):
         return tool_error(
             ToolErrorCode.INVALID_INPUT,
@@ -525,7 +559,7 @@ def submit_job_application(job_id: str, tool_context: ToolContext) -> dict[str, 
             "message": "Waiting for the candidate to approve or reject this application.",
         }
 
-    decisions = list(state.get("application_decisions") or [])
+    decisions = list(state.get("user:application_decisions") or [])
     decisions.append(
         {
             "job_id": job_id,
@@ -533,7 +567,7 @@ def submit_job_application(job_id: str, tool_context: ToolContext) -> dict[str, 
             "decided_at": datetime.now(UTC).isoformat(),
         }
     )
-    state["application_decisions"] = decisions
+    state["user:application_decisions"] = decisions
     if not confirmation.confirmed:
         return {
             "status": "cancelled",
@@ -561,7 +595,7 @@ def submit_job_application(job_id: str, tool_context: ToolContext) -> dict[str, 
                 "submitted_at": result.get("received_at"),
             }
         )
-        state["application_history"] = history
+        state["user:application_history"] = history
     return result
 
 
@@ -573,6 +607,6 @@ def get_application_history(tool_context: ToolContext) -> dict[str, Any]:
     """
     return {
         "status": "success",
-        "submitted": list(tool_context.state.get("application_history") or []),
-        "decisions": list(tool_context.state.get("application_decisions") or []),
+        "submitted": list(tool_context.state.get("user:application_history") or []),
+        "decisions": list(tool_context.state.get("user:application_decisions") or []),
     }

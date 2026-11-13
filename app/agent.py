@@ -22,7 +22,8 @@
         ├── document_writers         ParallelAgent
         │   ├── resume_rewriter      (REASONING) tailored ATS resume
         │   └── cover_letter_writer  (REASONING) matching cover letter
-        └── ats_rescorer             (FAST)   AFTER score + comparison
+        ├── ats_rescorer             (FAST)   AFTER score + comparison
+        └── truthfulness_judge       (FAST)   LLM-as-judge fabrication check
     + prepare_application_package, submit_job_application (HUMAN APPROVAL),
       get_application_history                 -> Mock ATS service
 
@@ -35,11 +36,17 @@ from google.adk.agents import Agent, ParallelAgent, SequentialAgent
 from google.adk.apps import App
 from google.adk.models import Gemini
 from google.adk.tools import AgentTool
+from google.adk.tools.load_memory_tool import load_memory_tool
+from google.adk.tools.preload_memory_tool import preload_memory_tool
 from google.genai import types
 
 from app import prompts
 from app.config import get_settings
+from app.context_management import ContextBudgetPlugin, build_compaction_config
+from app.guardrails import SafetyGuardrailPlugin, prepare_truthfulness_evidence
+from app.memory import MemoryConsolidationPlugin
 from app.observability.plugin import ObservabilityPlugin
+from app.tools.schemas import TruthfulnessReview
 from app.tools.session_tools import (
     extract_requirements_for_target_job,
     find_jobs_matching_saved_preferences,
@@ -65,8 +72,19 @@ _RETRY = types.HttpRetryOptions(attempts=3)
 FAST_MODEL = Gemini(model=settings.models.fast, retry_options=_RETRY)
 REASONING_MODEL = Gemini(model=settings.models.reasoning, retry_options=_RETRY)
 
-_PRECISE = types.GenerateContentConfig(temperature=0.1)
-_CREATIVE = types.GenerateContentConfig(temperature=0.4)
+# Gemini safety settings: first guardrail layer on every model call (rubric 3.3).
+_SAFETY = [
+    types.SafetySetting(category=c, threshold=types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE)
+    for c in (
+        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    )
+]
+_PRECISE = types.GenerateContentConfig(temperature=0.1, safety_settings=_SAFETY)
+_CREATIVE = types.GenerateContentConfig(temperature=0.4, safety_settings=_SAFETY)
+_JUDGE = types.GenerateContentConfig(temperature=0.0, safety_settings=_SAFETY)
 
 # --------------------------------------------------------------------------- #
 # Specialists
@@ -143,14 +161,29 @@ ats_rescorer = Agent(
     generate_content_config=_PRECISE,
 )
 
+# LLM-as-judge self-evaluation guardrail (rubric 3.3). Structured output, so the
+# apply step can gate on verdict == "PASS" deterministically.
+truthfulness_judge = Agent(
+    name="truthfulness_judge",
+    description="Independently checks the tailored documents for fabricated claims.",
+    model=FAST_MODEL,
+    instruction=prompts.TRUTHFULNESS_JUDGE_INSTRUCTION,
+    include_contents="none",
+    before_agent_callback=prepare_truthfulness_evidence,
+    output_schema=TruthfulnessReview,
+    output_key="truthfulness_review",
+    generate_content_config=_JUDGE,
+)
+
 resume_tailoring_pipeline = SequentialAgent(
     name="resume_tailoring_pipeline",
     description=(
         "For the selected target job: scores the original resume (BEFORE), plans "
         "truthful changes, writes the tailored resume and cover letter in parallel, "
-        "then re-scores (AFTER). Requires a loaded resume and a selected job."
+        "re-scores (AFTER), then a judge checks for fabricated claims. Requires a "
+        "loaded resume and a selected job."
     ),
-    sub_agents=[ats_gap_analyst, document_writers, ats_rescorer],
+    sub_agents=[ats_gap_analyst, document_writers, ats_rescorer, truthfulness_judge],
 )
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +209,10 @@ root_agent = Agent(
         prepare_application_package,
         submit_job_application,
         get_application_history,
+        # Long-term memory (rubric 2.3): relevant memories are injected
+        # automatically each turn; load_memory lets the agent search on demand.
+        preload_memory_tool,
+        load_memory_tool,
     ],
     generate_content_config=_PRECISE,
 )
@@ -185,5 +222,12 @@ app = App(
     name="app",
     # Structured, PII-scrubbed AGENT_INTENT / AGENT_OUTCOME logging for every
     # agent, model call and tool, including specialists run via AgentTool.
-    plugins=[ObservabilityPlugin()],
+    plugins=[
+        SafetyGuardrailPlugin(),  # Model Armor + injection screening (3.3)
+        ContextBudgetPlugin(),  # sliding-window trim of old tool output (2.2)
+        ObservabilityPlugin(),  # intent/outcome logs (4.1, 4.2)
+        MemoryConsolidationPlugin(),  # background, PII-scrubbed memory (2.4)
+    ],
+    # Summarise older turns with the fast model (2.2).
+    events_compaction_config=build_compaction_config(FAST_MODEL),
 )
