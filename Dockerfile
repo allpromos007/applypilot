@@ -22,6 +22,9 @@ WORKDIR /code
 COPY ./pyproject.toml ./README.md ./uv.lock* ./
 
 COPY ./app ./app
+# Job-board company list and the demo resumes/JDs used in the hosted demo.
+COPY ./config ./config
+COPY ./samples ./samples
 
 RUN uv sync --frozen
 

@@ -45,6 +45,8 @@ variable "app_sa_roles" {
     "roles/cloudtrace.agent",
     "roles/storage.admin",
     "roles/serviceusage.serviceUsageConsumer",
+    "roles/dlp.user",       # PII redaction via Cloud DLP (rubric 4.4)
+    "roles/modelarmor.user", # prompt/response screening (rubric 3.3)
   ]
 }
 

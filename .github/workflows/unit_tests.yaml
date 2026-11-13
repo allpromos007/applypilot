@@ -1,0 +1,30 @@
+# Runs on every push and PR with no Google Cloud credentials needed:
+# lint, unit tests, Mock ATS API tests, and the deterministic golden
+# regression suite (rubric 5.1). The LLM golden eval (`agents-cli eval run`)
+# needs Vertex AI access and runs in the staging pipeline / locally.
+name: Unit Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uvx ruff check app tests/unit tests/eval mock_ats
+      - name: Unit, Mock ATS and golden regression tests
+        env:
+          APPLYPILOT_DISABLE_SECRET_MANAGER: 'true'
+          MOCK_ATS_DATA_DIR: /tmp/mock_ats_test
+        run: uv run pytest tests/unit mock_ats/tests -q
