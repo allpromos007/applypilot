@@ -39,6 +39,7 @@ from google.genai import types
 
 from app import prompts
 from app.config import get_settings
+from app.observability.plugin import ObservabilityPlugin
 from app.tools.session_tools import (
     extract_requirements_for_target_job,
     find_jobs_matching_saved_preferences,
@@ -182,4 +183,7 @@ root_agent = Agent(
 app = App(
     root_agent=root_agent,
     name="app",
+    # Structured, PII-scrubbed AGENT_INTENT / AGENT_OUTCOME logging for every
+    # agent, model call and tool, including specialists run via AgentTool.
+    plugins=[ObservabilityPlugin()],
 )

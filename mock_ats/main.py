@@ -31,6 +31,7 @@ from mock_ats.models import (
     CandidateInfo,
     ErrorBody,
 )
+from mock_ats.observability import RequestLoggingMiddleware, get_logger
 from mock_ats.store import (
     ApplicationStore,
     DuplicateApplicationError,
@@ -48,6 +49,7 @@ def _error(status: int, code: str, message: str, **details) -> JSONResponse:
 
 def create_app(store: ApplicationStore | None = None) -> FastAPI:
     app = FastAPI(title="Mock ATS", version="1.0.0")
+    app.add_middleware(RequestLoggingMiddleware)
     app.state.store = store or SQLiteApplicationStore(
         Path(os.getenv("MOCK_ATS_DATA_DIR", ".mock_ats_data"))
     )
@@ -107,6 +109,7 @@ def create_app(store: ApplicationStore | None = None) -> FastAPI:
 
     @app.post("/applications", status_code=201, response_model=ApplicationReceipt)
     async def create_application(
+        request: Request,
         job_id: Annotated[str, Form(min_length=3, max_length=200)],
         candidate: Annotated[str, Form(description="CandidateInfo as JSON")],
         resume: Annotated[UploadFile, File()],
@@ -144,6 +147,17 @@ def create_app(store: ApplicationStore | None = None) -> FastAPI:
                     "details": {"existing_application_id": dup.existing_id},
                 },
             ) from dup
+        get_logger().info(
+            "application received",
+            extra={
+                "trace_id": getattr(request.state, "trace_id", None),
+                "fields": {
+                    "event_type": "APPLICATION_RECEIVED",
+                    "application_id": record.application_id,
+                    "job_id": job_id,
+                },
+            },
+        )
         return ApplicationReceipt(
             **record.model_dump(include=set(ApplicationReceipt.model_fields))
         )

@@ -29,6 +29,7 @@ from google.adk.tools import ToolContext
 from pydantic import Field, ValidationError
 
 from app.config import get_settings
+from app.observability.tracing import traced
 from app.tools.application_tools import ApplicationAdapter, MockATSAdapter
 from app.tools.ats_tools import calculate_ats_match_score, extract_job_requirements
 from app.tools.document_tools import render_ats_docx
@@ -408,12 +409,15 @@ def prepare_application_package(tool_context: ToolContext) -> dict[str, Any]:
         )
     )
     try:
-        resume_path = render_ats_docx(
-            state["tailored_resume"], contact, folder / f"{_slug(name)}-resume.docx"
-        )
-        letter_path = render_ats_docx(
-            state["cover_letter"], contact, folder / f"{_slug(name)}-cover-letter.docx"
-        )
+        with traced("documents.render_docx", job_id=job_id):
+            resume_path = render_ats_docx(
+                state["tailored_resume"], contact, folder / f"{_slug(name)}-resume.docx"
+            )
+            letter_path = render_ats_docx(
+                state["cover_letter"],
+                contact,
+                folder / f"{_slug(name)}-cover-letter.docx",
+            )
     except Exception as exc:
         return tool_error(
             ToolErrorCode.INTERNAL_ERROR,

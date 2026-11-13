@@ -110,3 +110,17 @@ uv run pytest mock_ats/tests                        # API tests
 ```
 
 **Human approval (rubric 3.4):** `submit_job_application` always pauses with ADK's tool-confirmation request (`adk_request_confirmation`). Nothing is sent until the candidate approves in the UI. Each approve or reject decision is recorded in session state (`application_decisions`). The tool sits on the coordinator rather than inside an `AgentTool` specialist, because `AgentTool` discards its nested session and so cannot resume after an approval pause.
+
+## Observability (logs, intent vs. outcome, tracing, PII)
+
+| Rubric | Where | What it does |
+|---|---|---|
+| 4.1 Structured logging | [app/observability/logging.py](app/observability/logging.py) | Google Cloud Logging `StructuredLogHandler`: one JSON line per event, with `severity`, `event_type`, `session_id`, `invocation_id`, `agent_name`, `trace_id`/`span_id`. No `print()` in agent code. |
+| 4.2 Intent vs. outcome | [app/observability/plugin.py](app/observability/plugin.py) | ADK plugin, registered once on the `App`, so it covers every agent, including those run through `AgentTool`. Logs `AGENT_INTENT` before each tool runs (tool, purpose, scrubbed arguments, the model's stated rationale, high-stakes flag, human decision) and `AGENT_OUTCOME` after it (status, `achieved_intent`, error code, latency, result summary). The two events share an `action_id`. Also logs model routing and token usage. |
+| 4.3 Distributed tracing | [app/observability/tracing.py](app/observability/tracing.py) | Custom OpenTelemetry spans nested under ADK's own agent, LLM and tool spans. The agent sends a W3C `traceparent` header to the Mock ATS, so the Mock ATS's log lines carry the same trace ID (`logging.googleapis.com/trace`). |
+| 4.4 PII redaction | [app/observability/pii.py](app/observability/pii.py) | `PIIScrubber`: Cloud DLP (`APPLYPILOT_USE_DLP=true`) plus regex redaction that always runs. Redacts emails, phone numbers, SSNs, Luhn-checked card numbers, API keys and tokens, and profile URLs, plus the candidate's own contact values verbatim. Applied to every log record before it is written. |
+
+Example: find every high-stakes action and what happened to it.
+```
+jsonPayload.event_type=("AGENT_INTENT" OR "AGENT_OUTCOME") AND jsonPayload.high_stakes=true
+```

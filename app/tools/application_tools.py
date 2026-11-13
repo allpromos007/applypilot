@@ -16,6 +16,7 @@ from typing import Any, Protocol
 import httpx
 
 from app.config import get_settings
+from app.observability.tracing import mark_outcome, trace_headers, traced
 from app.tools.errors import ToolErrorCode, tool_error
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -57,8 +58,23 @@ class MockATSAdapter:
     def submit(
         self, job_id, candidate, resume_path, cover_letter_path
     ) -> dict[str, Any]:
+        with traced(
+            "mock_ats.submit_application", job_id=job_id, ats_url=self.base_url
+        ) as span:
+            result = self._submit(job_id, candidate, resume_path, cover_letter_path)
+            mark_outcome(span, result)
+            if result.get("application_id"):
+                span.set_attribute(
+                    "applypilot.application_id", result["application_id"]
+                )
+            return result
+
+    def _submit(
+        self, job_id, candidate, resume_path, cover_letter_path
+    ) -> dict[str, Any]:
         try:
-            headers = _id_token_headers(self.base_url)
+            # traceparent header -> the Mock ATS joins this same trace.
+            headers = {**_id_token_headers(self.base_url), **trace_headers()}
             with (
                 httpx.Client(timeout=self.timeout, transport=self._transport) as client,
                 open(resume_path, "rb") as resume,
